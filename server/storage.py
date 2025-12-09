@@ -31,7 +31,7 @@ class Storage:
     
     def _init_database(self):
         """Initialize database schema."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
         cursor = conn.cursor()
         
         # Users table
@@ -83,18 +83,21 @@ class Storage:
         Returns:
             True if successful, False if user already exists
         """
+        conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = sqlite3.connect(self.db_path, timeout=10.0)
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO users (user_id, public_key, counter) VALUES (?, ?, ?)",
                 (user_id, public_key, 0)
             )
             conn.commit()
-            conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
+        finally:
+            if conn:
+                conn.close()
     
     def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -106,14 +109,16 @@ class Storage:
         Returns:
             User dictionary or None if not found
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT user_id, public_key, counter, created_at FROM users WHERE user_id = ?",
-            (user_id,)
-        )
-        row = cursor.fetchone()
-        conn.close()
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT user_id, public_key, counter, created_at FROM users WHERE user_id = ?",
+                (user_id,)
+            )
+            row = cursor.fetchone()
+        finally:
+            conn.close()
         
         if row:
             return {
@@ -161,16 +166,18 @@ class Storage:
         Returns:
             True if successful
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE users SET counter = ? WHERE user_id = ?",
-            (new_counter, user_id)
-        )
-        conn.commit()
-        success = cursor.rowcount > 0
-        conn.close()
-        return success
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET counter = ? WHERE user_id = ?",
+                (new_counter, user_id)
+            )
+            conn.commit()
+            success = cursor.rowcount > 0
+            return success
+        finally:
+            conn.close()
     
     def add_ledger_entry(self, user_id: str, payer: str, amount: float,
                         description: str, timestamp: str, counter: int,
@@ -192,8 +199,9 @@ class Storage:
         Returns:
             Entry ID if successful, None otherwise
         """
+        conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = sqlite3.connect(self.db_path, timeout=10.0)
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO ledger 
@@ -202,11 +210,13 @@ class Storage:
             """, (user_id, payer, amount, description, timestamp, counter, signature, prev_hash, entry_hash))
             entry_id = cursor.lastrowid
             conn.commit()
-            conn.close()
             return entry_id
         except Exception as e:
             print(f"Error adding ledger entry: {e}")
             return None
+        finally:
+            if conn:
+                conn.close()
     
     def get_ledger_entries(self) -> List[Dict[str, Any]]:
         """
@@ -215,16 +225,18 @@ class Storage:
         Returns:
             List of ledger entry dictionaries
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, user_id, payer, amount, description, timestamp, 
-                   counter, signature, prev_hash, entry_hash
-            FROM ledger
-            ORDER BY id ASC
-        """)
-        rows = cursor.fetchall()
-        conn.close()
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, user_id, payer, amount, description, timestamp, 
+                       counter, signature, prev_hash, entry_hash
+                FROM ledger
+                ORDER BY id ASC
+            """)
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
         
         entries = []
         for row in rows:
@@ -249,17 +261,19 @@ class Storage:
         Returns:
             Last entry dictionary or None if ledger is empty
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, user_id, payer, amount, description, timestamp,
-                   counter, signature, prev_hash, entry_hash
-            FROM ledger
-            ORDER BY id DESC
-            LIMIT 1
-        """)
-        row = cursor.fetchone()
-        conn.close()
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, user_id, payer, amount, description, timestamp,
+                       counter, signature, prev_hash, entry_hash
+                FROM ledger
+                ORDER BY id DESC
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+        finally:
+            conn.close()
         
         if row:
             return {
@@ -286,12 +300,14 @@ class Storage:
         Returns:
             Value or None
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT value FROM server_metadata WHERE key = ?", (key,))
-        row = cursor.fetchone()
-        conn.close()
-        return row[0] if row else None
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM server_metadata WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row[0] if row else None
+        finally:
+            conn.close()
     
     def set_metadata(self, key: str, value: str):
         """
@@ -301,14 +317,16 @@ class Storage:
             key: Metadata key
             value: Metadata value
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT OR REPLACE INTO server_metadata (key, value)
-            VALUES (?, ?)
-        """, (key, value))
-        conn.commit()
-        conn.close()
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO server_metadata (key, value)
+                VALUES (?, ?)
+            """, (key, value))
+            conn.commit()
+        finally:
+            conn.close()
     
     def list_users(self) -> List[str]:
         """
@@ -317,9 +335,11 @@ class Storage:
         Returns:
             List of user IDs
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT user_id FROM users ORDER BY user_id")
-        rows = cursor.fetchall()
-        conn.close()
-        return [row[0] for row in rows]
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT user_id FROM users ORDER BY user_id")
+            rows = cursor.fetchall()
+            return [row[0] for row in rows]
+        finally:
+            conn.close()

@@ -56,8 +56,8 @@ def demo_modification():
     
     print("4. Message encrypted and sent to server")
     print(f"   Nonce: {encrypted['nonce'][:32]}...")
-    print(f"   Ciphertext: {encrypted['ciphertext'][:64]}...")
-    print(f"   Auth Tag: {encrypted['tag'][:32]}...")
+    print(f"   Ciphertext (includes auth tag): {encrypted['ciphertext'][:64]}...")
+    print("   (Note: AES-GCM includes authentication tag in ciphertext)")
     
     # ATTACKER INTERCEPTS AND MODIFIES
     print("\n5. ATTACKER INTERCEPTS THE MESSAGE:")
@@ -68,22 +68,27 @@ def demo_modification():
     print("   (by flipping bits in the ciphertext)")
     
     # Modify the ciphertext (flip some bits)
+    # Note: In AES-GCM, the tag is appended to the ciphertext
     ciphertext_bytes = MessageEncoder.b64decode(encrypted['ciphertext'])
     modified_ciphertext = bytearray(ciphertext_bytes)
     
     # Flip some bits in the middle (where amount might be)
+    # Don't modify the last 16 bytes (where the tag is)
     if len(modified_ciphertext) > 20:
-        modified_ciphertext[10] ^= 0xFF  # Flip bits
-        modified_ciphertext[15] ^= 0xFF  # Flip more bits
+        # Modify bytes in the middle, avoiding the tag at the end
+        mod_pos = min(10, len(modified_ciphertext) - 17)
+        if mod_pos > 0:
+            modified_ciphertext[mod_pos] ^= 0xFF  # Flip bits
+            if len(modified_ciphertext) > mod_pos + 5:
+                modified_ciphertext[mod_pos + 5] ^= 0xFF  # Flip more bits
     
     modified_encrypted = {
         'nonce': encrypted['nonce'],
-        'ciphertext': MessageEncoder.b64encode(bytes(modified_ciphertext)),
-        'tag': encrypted['tag']  # Attacker doesn't know how to update the tag
+        'ciphertext': MessageEncoder.b64encode(bytes(modified_ciphertext))
     }
     
     print(f"   Modified ciphertext: {modified_encrypted['ciphertext'][:64]}...")
-    print("   (Note: Auth tag remains unchanged - attacker cannot forge it)")
+    print("   (Note: Auth tag is embedded in ciphertext - modification will be detected)")
     
     # Try to send modified message to server
     print("\n7. ATTACKER SENDS MODIFIED MESSAGE TO SERVER:")
@@ -94,16 +99,25 @@ def demo_modification():
     # Server's response
     print("\n8. SERVER RESPONSE:")
     if response:
-        # Try to decrypt the response
-        plaintext = alice.crypto.decrypt_message(response["nonce"], response["ciphertext"])
-        if plaintext:
-            from shared.protocols import ProtocolMessage
-            response_msg = ProtocolMessage.from_bytes(plaintext)
-            print(f"   Message Type: {response_msg.msg_type}")
-            if response_msg.msg_type == "ERROR":
-                print(f"   ✓ Error Detected: {response_msg.payload.get('message', 'Unknown error')}")
-                print("\n   SERVER REJECTED THE MODIFIED MESSAGE!")
-                print("   Reason: GCM authentication tag verification failed")
+        # Check if response is encrypted or plain error
+        if "nonce" in response and "ciphertext" in response:
+            # Encrypted response - try to decrypt
+            plaintext = alice.crypto.decrypt_message(response["nonce"], response["ciphertext"])
+            if plaintext:
+                from shared.protocols import ProtocolMessage
+                response_msg = ProtocolMessage.from_bytes(plaintext)
+                print(f"   Message Type: {response_msg.msg_type}")
+                if response_msg.msg_type == "ERROR":
+                    print(f"   ✓ Error Detected: {response_msg.payload.get('message', 'Unknown error')}")
+                    print("\n   SERVER REJECTED THE MODIFIED MESSAGE!")
+                    print("   Reason: GCM authentication tag verification failed")
+        else:
+            # Unencrypted error response (decryption failed)
+            print(f"   Message Type: {response.get('msg_type', 'ERROR')}")
+            error_msg = response.get('payload', {}).get('message', 'Decryption failed')
+            print(f"   ✓ Error Detected: {error_msg}")
+            print("\n   SERVER REJECTED THE MODIFIED MESSAGE!")
+            print("   Reason: GCM authentication tag verification failed (decryption failed)")
     
     # Verify ledger is unchanged
     print("\n9. VERIFYING LEDGER INTEGRITY:")

@@ -71,7 +71,18 @@ def demo_eavesdropping():
         pass
     
     print("\n6. LEGITIMATE SERVER DECRYPTS SUCCESSFULLY:")
-    alice.add_expense("alice", 100.00, "Secret dinner plans")
+    # Send the encrypted message to server
+    response = server.process_message(alice.crypto.session_id, encrypted)
+    if response:
+        plaintext = alice.crypto.decrypt_message(response["nonce"], response["ciphertext"])
+        if plaintext:
+            from shared.protocols import ProtocolMessage
+            response_msg = ProtocolMessage.from_bytes(plaintext)
+            if response_msg.msg_type == "EXPENSE_SUBMIT_RESPONSE":
+                print("   ✓ Server successfully decrypted and processed the expense")
+                print(f"   Entry ID: {response_msg.payload.get('entry_id')}")
+            else:
+                print("   ✓ Server successfully decrypted the message")
     
     print_header("RESULT: Confidentiality Preserved")
     print("✓ AES-256-GCM encryption protects against eavesdropping")
