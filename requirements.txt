@@ -1,0 +1,12 @@
+# Cryptography library for all crypto operations
+cryptography>=41.0.0
+
+# For testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# For CLI interface
+click>=8.1.0
+
+# For colored terminal output
+colorama>=0.4.6
