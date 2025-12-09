@@ -279,7 +279,9 @@ function setupButtons() {
 // Check Status
 async function checkStatus() {
     try {
-        const response = await fetch(`${API_BASE}/api/status`);
+        const response = await fetch(`${API_BASE}/api/status`, {
+            credentials: 'include'
+        });
         const data = await response.json();
         
         if (data.success && data.logged_in) {
@@ -304,6 +306,7 @@ async function register(username, password) {
         
         const response = await fetch(`${API_BASE}/api/register`, {
             method: 'POST',
+            credentials: 'include',
             headers: {
                 'Content-Type': 'application/json'
             },
@@ -331,6 +334,7 @@ async function login(username, password) {
         
         const response = await fetch(`${API_BASE}/api/login`, {
             method: 'POST',
+            credentials: 'include',
             headers: {
                 'Content-Type': 'application/json'
             },
@@ -363,7 +367,8 @@ async function login(username, password) {
 async function logout() {
     try {
         const response = await fetch(`${API_BASE}/api/logout`, {
-            method: 'POST'
+            method: 'POST',
+            credentials: 'include'
         });
         
         const data = await response.json();
@@ -386,6 +391,7 @@ async function addExpense(payer, amount, description) {
         
         const response = await fetch(`${API_BASE}/api/add_expense`, {
             method: 'POST',
+            credentials: 'include',
             headers: {
                 'Content-Type': 'application/json'
             },
@@ -414,7 +420,9 @@ async function loadLedger() {
     ledgerContent.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i><p>Loading ledger...</p></div>';
     
     try {
-        const response = await fetch(`${API_BASE}/api/ledger`);
+        const response = await fetch(`${API_BASE}/api/ledger`, {
+            credentials: 'include'
+        });
         const data = await response.json();
         
         if (data.success && data.entries) {
@@ -461,7 +469,9 @@ async function loadBalances() {
     balancesContent.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i><p>Loading balances...</p></div>';
     
     try {
-        const response = await fetch(`${API_BASE}/api/balances`);
+        const response = await fetch(`${API_BASE}/api/balances`, {
+            credentials: 'include'
+        });
         const data = await response.json();
         
         if (data.success && data.balances) {
@@ -503,7 +513,9 @@ async function verifyTampering() {
     resultDiv.classList.add('show');
     
     try {
-        const response = await fetch(`${API_BASE}/api/verify_tampering`);
+        const response = await fetch(`${API_BASE}/api/verify_tampering`, {
+            credentials: 'include'
+        });
         const data = await response.json();
         
         if (data.success) {
@@ -545,16 +557,38 @@ async function verifyTampering() {
 // Load Analytics
 async function loadAnalytics() {
     try {
-        const response = await fetch(`${API_BASE}/api/analytics`);
+        const response = await fetch(`${API_BASE}/api/analytics`, {
+            method: 'GET',
+            credentials: 'include',  // Include cookies for session
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        // Check if response is OK
+        if (!response.ok) {
+            if (response.status === 401) {
+                // Session expired, redirect to login
+                showToast('Session expired. Please login again.', 'error');
+                isLoggedIn = false;
+                currentUser = null;
+                updateUI();
+                return;
+            }
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();
         
         if (data.success && data.analytics) {
             displayAnalytics(data.analytics);
         } else {
-            console.error('Failed to load analytics:', data.error);
+            console.error('Failed to load analytics:', data.error || data.message);
+            showToast('Failed to load analytics: ' + (data.error || data.message || 'Unknown error'), 'error');
         }
     } catch (error) {
         console.error('Error loading analytics:', error);
+        showToast('Error loading analytics: ' + error.message, 'error');
     }
 }
 
@@ -694,7 +728,9 @@ function updateUI() {
 // Load Blockchain
 async function loadBlockchain() {
     try {
-        const response = await fetch(`${API_BASE}/api/blockchain`);
+        const response = await fetch(`${API_BASE}/api/blockchain`, {
+            credentials: 'include'
+        });
         const data = await response.json();
         
         if (data.success && data.blockchain) {

@@ -24,7 +24,19 @@ from client.client import SplitSmartClient
 app = Flask(__name__)
 # Use environment variable for secret key in production
 app.secret_key = os.environ.get('SECRET_KEY', 'split-smart-secure-key-change-in-production')
-CORS(app)
+
+# Configure session cookies for production
+# In production (HTTPS), use secure cookies
+is_production = os.environ.get('FLASK_ENV') == 'production' or os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('RENDER')
+app.config['SESSION_COOKIE_SECURE'] = is_production  # Only send cookies over HTTPS in production
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # 24 hour sessions
+
+# Configure CORS to allow credentials (for session cookies)
+# In production, allow credentials from any origin (Railway/Render provide HTTPS)
+# For better security, you can restrict to specific domains
+CORS(app, supports_credentials=True)
 
 # Global server instance (shared across requests)
 _server_instance = None
@@ -520,10 +532,18 @@ def api_analytics():
     try:
         username = session.get('user_id')
         if not username:
-            return jsonify({'success': False, 'error': 'Not logged in'}), 401
+            return jsonify({
+                'success': False, 
+                'error': 'Not logged in',
+                'debug': 'Session expired or not authenticated'
+            }), 401
         
         server = get_server()
         entries = server.ledger.get_all_entries()
+        
+        # Log for debugging (remove in production if needed)
+        if os.environ.get('FLASK_DEBUG', 'False').lower() == 'true':
+            print(f"[Analytics] User: {username}, Entries: {len(entries) if entries else 0}")
         
         if not entries:
             return jsonify({
@@ -629,7 +649,17 @@ def api_analytics():
             'analytics': analytics
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        # Log error for debugging
+        import traceback
+        error_trace = traceback.format_exc()
+        if os.environ.get('FLASK_DEBUG', 'False').lower() == 'true':
+            print(f"[Analytics Error] {str(e)}")
+            print(error_trace)
+        return jsonify({
+            'success': False, 
+            'error': str(e),
+            'message': 'Failed to load analytics data'
+        }), 500
 
 if __name__ == '__main__':
     print("=" * 80)

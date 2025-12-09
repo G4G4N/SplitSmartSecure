@@ -423,3 +423,4 @@ SplitSmart provides **military-grade security** through:
 
 The system is designed to be **secure by default** and **resistant to common attacks**, making it suitable for sensitive financial data in expense splitting scenarios.
 
+

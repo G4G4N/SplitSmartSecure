@@ -160,3 +160,4 @@ The web application uses:
 - The server instance is shared across all requests (thread-safe)
 - All cryptographic operations happen server-side using the existing Python code
 
+
