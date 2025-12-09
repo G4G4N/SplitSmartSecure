@@ -201,7 +201,7 @@ python demos/demo_tampering.py
 Test multiple users and race conditions:
 
 ```bash
-python test_concurrent_users.py
+python tests/test_concurrent_users.py
 ```
 
 **Tests:**
@@ -227,11 +227,13 @@ python -m pytest tests/test_crypto.py -v
 python -m pytest tests/ --cov=. --cov-report=html
 ```
 
-**Test Files:**
-- `test_crypto.py` - Cryptographic primitives
-- `test_key_exchange.py` - Key exchange protocol
-- `test_signature.py` - Digital signatures
-- `test_basic.py` - Basic workflow
+**Test Files (in tests/ directory):**
+- `tests/test_crypto.py` - Cryptographic primitives
+- `tests/test_key_exchange.py` - Key exchange protocol
+- `tests/test_signature.py` - Digital signatures
+- `tests/test_basic.py` - Basic workflow
+- `tests/test_concurrent_users.py` - Concurrent operations
+- `tests/test_debug.py` - Debug and troubleshooting
 
 ---
 
