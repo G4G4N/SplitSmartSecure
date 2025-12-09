@@ -69,7 +69,12 @@ def demo_replay():
     response = server.process_message(alice.crypto.session_id, encrypted)
     
     # Decrypt response to see error
-    plaintext = alice.crypto.decrypt_message(response["nonce"], response["ciphertext"])
+    algorithm = response.get("algorithm", "AES-256-GCM")
+    plaintext = alice.crypto.decrypt_message(
+        response["nonce"], 
+        response["ciphertext"],
+        algorithm
+    )
     if plaintext:
         from shared.protocols import ProtocolMessage
         response_msg = ProtocolMessage.from_bytes(plaintext)

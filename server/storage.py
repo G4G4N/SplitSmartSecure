@@ -39,15 +39,23 @@ class Storage:
             CREATE TABLE IF NOT EXISTS users (
                 user_id TEXT PRIMARY KEY,
                 public_key TEXT NOT NULL,
+                password_hash TEXT,
                 counter INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         
-        # Ledger table
+        # Add password_hash column if it doesn't exist (for existing databases)
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        # Ledger table (Blockchain structure)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS ledger (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                block_height INTEGER NOT NULL,
                 user_id TEXT NOT NULL,
                 payer TEXT NOT NULL,
                 amount REAL NOT NULL,
@@ -57,9 +65,19 @@ class Storage:
                 signature TEXT NOT NULL,
                 prev_hash TEXT NOT NULL,
                 entry_hash TEXT NOT NULL,
+                merkle_root TEXT,
+                block_hash TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
+        
+        # Add blockchain columns if they don't exist (for existing databases)
+        try:
+            cursor.execute("ALTER TABLE ledger ADD COLUMN block_height INTEGER DEFAULT 0")
+            cursor.execute("ALTER TABLE ledger ADD COLUMN merkle_root TEXT")
+            cursor.execute("ALTER TABLE ledger ADD COLUMN block_hash TEXT")
+        except sqlite3.OperationalError:
+            pass  # Columns already exist
         
         # Server metadata table
         cursor.execute("""
@@ -72,13 +90,14 @@ class Storage:
         conn.commit()
         conn.close()
     
-    def register_user(self, user_id: str, public_key: str) -> bool:
+    def register_user(self, user_id: str, public_key: str, password_hash: Optional[str] = None) -> bool:
         """
         Register a new user.
         
         Args:
             user_id: User identifier
             public_key: User's public key (PEM format)
+            password_hash: Hashed password (optional, for password-based auth)
             
         Returns:
             True if successful, False if user already exists
@@ -88,8 +107,8 @@ class Storage:
             conn = sqlite3.connect(self.db_path, timeout=10.0)
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO users (user_id, public_key, counter) VALUES (?, ?, ?)",
-                (user_id, public_key, 0)
+                "INSERT INTO users (user_id, public_key, password_hash, counter) VALUES (?, ?, ?, ?)",
+                (user_id, public_key, password_hash, 0)
             )
             conn.commit()
             return True
@@ -113,7 +132,7 @@ class Storage:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT user_id, public_key, counter, created_at FROM users WHERE user_id = ?",
+                "SELECT user_id, public_key, password_hash, counter, created_at FROM users WHERE user_id = ?",
                 (user_id,)
             )
             row = cursor.fetchone()
@@ -124,10 +143,44 @@ class Storage:
             return {
                 "user_id": row[0],
                 "public_key": row[1],
-                "counter": row[2],
-                "created_at": row[3]
+                "password_hash": row[2] if len(row) > 2 else None,
+                "counter": row[3] if len(row) > 3 else row[2],
+                "created_at": row[4] if len(row) > 4 else row[3]
             }
         return None
+    
+    def get_user_password_hash(self, user_id: str) -> Optional[str]:
+        """
+        Get user's password hash.
+        
+        Args:
+            user_id: User identifier
+            
+        Returns:
+            Password hash or None if not found
+        """
+        user = self.get_user(user_id)
+        return user.get("password_hash") if user else None
+    
+    def verify_user_password(self, user_id: str, password: str) -> bool:
+        """
+        Verify user password.
+        
+        Args:
+            user_id: User identifier
+            password: Plain text password
+            
+        Returns:
+            True if password is correct, False otherwise
+        """
+        import bcrypt
+        password_hash = self.get_user_password_hash(user_id)
+        if not password_hash:
+            return False
+        try:
+            return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+        except Exception:
+            return False
     
     def get_user_public_key(self, user_id: str) -> Optional[str]:
         """
@@ -181,9 +234,11 @@ class Storage:
     
     def add_ledger_entry(self, user_id: str, payer: str, amount: float,
                         description: str, timestamp: str, counter: int,
-                        signature: str, prev_hash: str, entry_hash: str) -> Optional[int]:
+                        signature: str, prev_hash: str, entry_hash: str,
+                        block_height: int = 0, merkle_root: Optional[str] = None,
+                        block_hash: Optional[str] = None) -> Optional[int]:
         """
-        Add entry to ledger.
+        Add entry to blockchain ledger.
         
         Args:
             user_id: User who created the entry
@@ -195,6 +250,9 @@ class Storage:
             signature: User's signature
             prev_hash: Previous entry hash
             entry_hash: This entry's hash
+            block_height: Block height/number
+            merkle_root: Merkle root hash
+            block_hash: Block hash
             
         Returns:
             Entry ID if successful, None otherwise
@@ -205,9 +263,11 @@ class Storage:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO ledger 
-                (user_id, payer, amount, description, timestamp, counter, signature, prev_hash, entry_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (user_id, payer, amount, description, timestamp, counter, signature, prev_hash, entry_hash))
+                (user_id, payer, amount, description, timestamp, counter, signature, 
+                 prev_hash, entry_hash, block_height, merkle_root, block_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, payer, amount, description, timestamp, counter, signature, 
+                  prev_hash, entry_hash, block_height, merkle_root, block_hash))
             entry_id = cursor.lastrowid
             conn.commit()
             return entry_id
@@ -229,8 +289,8 @@ class Storage:
         try:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, user_id, payer, amount, description, timestamp, 
-                       counter, signature, prev_hash, entry_hash
+                SELECT id, block_height, user_id, payer, amount, description, timestamp, 
+                       counter, signature, prev_hash, entry_hash, merkle_root, block_hash
                 FROM ledger
                 ORDER BY id ASC
             """)
@@ -240,18 +300,25 @@ class Storage:
         
         entries = []
         for row in rows:
-            entries.append({
+            entry = {
                 "id": row[0],
-                "user_id": row[1],
-                "payer": row[2],
-                "amount": row[3],
-                "description": row[4],
-                "timestamp": row[5],
-                "counter": row[6],
-                "signature": row[7],
-                "prev_hash": row[8],
-                "entry_hash": row[9]
-            })
+                "block_height": row[1] if len(row) > 1 else 0,
+                "user_id": row[2] if len(row) > 2 else row[1],
+                "payer": row[3] if len(row) > 3 else row[2],
+                "amount": row[4] if len(row) > 4 else row[3],
+                "description": row[5] if len(row) > 5 else row[4],
+                "timestamp": row[6] if len(row) > 6 else row[5],
+                "counter": row[7] if len(row) > 7 else row[6],
+                "signature": row[8] if len(row) > 8 else row[7],
+                "prev_hash": row[9] if len(row) > 9 else row[8],
+                "entry_hash": row[10] if len(row) > 10 else row[9]
+            }
+            # Add blockchain fields if available
+            if len(row) > 11:
+                entry["merkle_root"] = row[11]
+            if len(row) > 12:
+                entry["block_hash"] = row[12]
+            entries.append(entry)
         return entries
     
     def get_last_ledger_entry(self) -> Optional[Dict[str, Any]]:
@@ -265,8 +332,8 @@ class Storage:
         try:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, user_id, payer, amount, description, timestamp,
-                       counter, signature, prev_hash, entry_hash
+                SELECT id, block_height, user_id, payer, amount, description, timestamp,
+                       counter, signature, prev_hash, entry_hash, merkle_root, block_hash
                 FROM ledger
                 ORDER BY id DESC
                 LIMIT 1
@@ -276,18 +343,24 @@ class Storage:
             conn.close()
         
         if row:
-            return {
+            entry = {
                 "id": row[0],
-                "user_id": row[1],
-                "payer": row[2],
-                "amount": row[3],
-                "description": row[4],
-                "timestamp": row[5],
-                "counter": row[6],
-                "signature": row[7],
-                "prev_hash": row[8],
-                "entry_hash": row[9]
+                "block_height": row[1] if len(row) > 1 else 0,
+                "user_id": row[2] if len(row) > 2 else row[1],
+                "payer": row[3] if len(row) > 3 else row[2],
+                "amount": row[4] if len(row) > 4 else row[3],
+                "description": row[5] if len(row) > 5 else row[4],
+                "timestamp": row[6] if len(row) > 6 else row[5],
+                "counter": row[7] if len(row) > 7 else row[6],
+                "signature": row[8] if len(row) > 8 else row[7],
+                "prev_hash": row[9] if len(row) > 9 else row[8],
+                "entry_hash": row[10] if len(row) > 10 else row[9]
             }
+            if len(row) > 11:
+                entry["merkle_root"] = row[11]
+            if len(row) > 12:
+                entry["block_hash"] = row[12]
+            return entry
         return None
     
     def get_metadata(self, key: str) -> Optional[str]:

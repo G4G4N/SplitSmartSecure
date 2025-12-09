@@ -57,23 +57,37 @@ class SplitSmartServer:
             print(f"[Server] ✗ LEDGER INTEGRITY VIOLATION: {error}")
             print("[Server] WARNING: Ledger has been tampered with!")
     
-    def register_user(self, user_id: str, public_key_pem: str) -> bool:
+    def register_user(self, user_id: str, public_key_pem: str, password_hash: Optional[str] = None) -> bool:
         """
         Register a new user.
         
         Args:
             user_id: User identifier
             public_key_pem: User's public key (PEM format)
+            password_hash: Hashed password (optional, for password-based auth)
             
         Returns:
             True if successful
         """
-        success = self.storage.register_user(user_id, public_key_pem)
+        success = self.storage.register_user(user_id, public_key_pem, password_hash)
         if success:
             print(f"[Server] Registered user: {user_id}")
         else:
             print(f"[Server] User already exists: {user_id}")
         return success
+    
+    def verify_user_password(self, user_id: str, password: str) -> bool:
+        """
+        Verify user password.
+        
+        Args:
+            user_id: User identifier
+            password: Plain text password
+            
+        Returns:
+            True if password is correct
+        """
+        return self.storage.verify_user_password(user_id, password)
     
     def handle_client_hello(self, message: ProtocolMessage) -> ProtocolMessage:
         """
@@ -294,11 +308,13 @@ class SplitSmartServer:
             response = self.handle_client_hello(message)
             return response.to_dict()
         
-        # Decrypt message
+        # Decrypt message (support algorithm selection)
+        algorithm = encrypted_msg.get("algorithm", "AES-256-GCM")  # Default for backward compatibility
         plaintext = self.crypto.decrypt_message(
             session_id,
             encrypted_msg["nonce"],
-            encrypted_msg["ciphertext"]
+            encrypted_msg["ciphertext"],
+            algorithm
         )
         
         if plaintext is None:

@@ -86,7 +86,12 @@ def demo_spoofing():
     # Check server's response
     print("\n7. SERVER RESPONSE:")
     if response:
-        plaintext = bob.crypto.decrypt_message(response["nonce"], response["ciphertext"])
+        algorithm = response.get("algorithm", "AES-256-GCM")
+        plaintext = bob.crypto.decrypt_message(
+            response["nonce"], 
+            response["ciphertext"],
+            algorithm
+        )
         if plaintext:
             from shared.protocols import ProtocolMessage
             response_msg = ProtocolMessage.from_bytes(plaintext)

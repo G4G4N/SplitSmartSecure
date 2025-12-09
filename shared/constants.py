@@ -17,6 +17,24 @@ SIGNATURE_ALGORITHM = "RSA-PSS"  # or "Ed25519"
 GCM_NONCE_SIZE = 12  # bytes (96 bits recommended for GCM)
 GCM_TAG_SIZE = 16    # bytes (128 bits)
 
+# Encryption algorithm types
+ENCRYPTION_AES_GCM = "AES-256-GCM"
+ENCRYPTION_CHACHA20_POLY1305 = "ChaCha20-Poly1305"
+ENCRYPTION_AES_CBC_HMAC = "AES-256-CBC-HMAC-SHA256"
+
+# ChaCha20-Poly1305 parameters
+CHACHA20_NONCE_SIZE = 12  # bytes (96 bits)
+POLY1305_TAG_SIZE = 16    # bytes (128 bits)
+
+# AES-CBC parameters
+AES_CBC_IV_SIZE = 16  # bytes (128 bits)
+AES_CBC_BLOCK_SIZE = 16  # bytes
+HMAC_SIZE = 32  # bytes (256 bits for SHA256)
+
+# Algorithm selection thresholds
+SMALL_MESSAGE_THRESHOLD = 1024  # bytes - use ChaCha20 for small messages
+LARGE_MESSAGE_THRESHOLD = 10240  # bytes - use AES-GCM for large messages
+
 # Key derivation
 KDF_ALGORITHM = "HKDF"
 KDF_HASH = "SHA256"

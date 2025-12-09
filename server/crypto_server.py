@@ -165,29 +165,33 @@ class ServerCrypto:
         
         return session
     
-    def encrypt_message(self, session_id: str, plaintext: bytes) -> Optional[Dict]:
+    def encrypt_message(self, session_id: str, plaintext: bytes, algorithm: Optional[str] = None) -> Optional[Dict]:
         """
-        Encrypt message for a session.
+        Encrypt message for a session using selected algorithm.
         
         Args:
             session_id: Session identifier
             plaintext: Message to encrypt
+            algorithm: Encryption algorithm (auto-select if None)
             
         Returns:
-            Dictionary with nonce and ciphertext (base64) or None
+            Dictionary with algorithm, nonce, and ciphertext (base64) or None
         """
         session = self.get_session(session_id)
         if not session:
             return None
         
-        nonce, ciphertext = CryptoPrimitives.aes_gcm_encrypt(session["session_key"], plaintext)
+        algo, nonce_iv, ciphertext = CryptoPrimitives.encrypt_message(
+            session["session_key"], plaintext, algorithm
+        )
         
         return {
-            "nonce": MessageEncoder.b64encode(nonce),
+            "algorithm": algo,
+            "nonce": MessageEncoder.b64encode(nonce_iv),
             "ciphertext": MessageEncoder.b64encode(ciphertext)
         }
     
-    def decrypt_message(self, session_id: str, nonce_b64: str, ciphertext_b64: str) -> Optional[bytes]:
+    def decrypt_message(self, session_id: str, nonce_b64: str, ciphertext_b64: str, algorithm: Optional[str] = None) -> Optional[bytes]:
         """
         Decrypt message from a session.
         
@@ -203,10 +207,16 @@ class ServerCrypto:
         if not session:
             return None
         
-        nonce = MessageEncoder.b64decode(nonce_b64)
+        nonce_iv = MessageEncoder.b64decode(nonce_b64)
         ciphertext = MessageEncoder.b64decode(ciphertext_b64)
         
-        plaintext = CryptoPrimitives.aes_gcm_decrypt(session["session_key"], nonce, ciphertext)
+        # Default to AES-GCM for backward compatibility
+        if algorithm is None:
+            algorithm = "AES-256-GCM"
+        
+        plaintext = CryptoPrimitives.decrypt_message(
+            session["session_key"], algorithm, nonce_iv, ciphertext
+        )
         return plaintext
     
     def cleanup_expired_sessions(self):

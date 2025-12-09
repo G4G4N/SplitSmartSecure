@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SplitSmart - Secure Expense Splitting</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-shield-alt"></i>
+                    <h1>SplitSmart</h1>
+                </div>
+                <div class="header-info">
+                    <div id="userStatus" class="user-status">
+                        <span class="status-indicator"></span>
+                        <span id="statusText">Not logged in</span>
+                    </div>
+                    <button id="logoutBtn" class="btn btn-secondary" style="display: none;">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Login/Register Section -->
+            <section id="authSection" class="card auth-card">
+                <div class="card-header">
+                    <h2><i class="fas fa-user-lock"></i> Authentication</h2>
+                </div>
+                <div class="card-body">
+                    <div class="auth-tabs">
+                        <button class="tab-btn active" data-tab="login">Login</button>
+                        <button class="tab-btn" data-tab="register">Register</button>
+                    </div>
+                    <div id="loginTab" class="tab-content active">
+                        <form id="loginForm" class="auth-form">
+                            <div class="form-group">
+                                <label for="loginUsername">Username</label>
+                                <input type="text" id="loginUsername" required placeholder="Enter username" autocomplete="username">
+                            </div>
+                            <div class="form-group">
+                                <label for="loginPassword">Password</label>
+                                <input type="password" id="loginPassword" required placeholder="Enter password" autocomplete="current-password">
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-block">
+                                <i class="fas fa-sign-in-alt"></i> Login
+                            </button>
+                        </form>
+                    </div>
+                    <div id="registerTab" class="tab-content">
+                        <form id="registerForm" class="auth-form">
+                            <div class="form-group">
+                                <label for="registerUsername">Username</label>
+                                <input type="text" id="registerUsername" required placeholder="Enter username" autocomplete="username">
+                            </div>
+                            <div class="form-group">
+                                <label for="registerPassword">Password</label>
+                                <input type="password" id="registerPassword" required placeholder="Enter password (min 6 characters)" autocomplete="new-password" minlength="6">
+                                <small style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.25rem; display: block;">
+                                    Password must be at least 6 characters long
+                                </small>
+                            </div>
+                            <div class="form-group">
+                                <label for="registerPasswordConfirm">Confirm Password</label>
+                                <input type="password" id="registerPasswordConfirm" required placeholder="Confirm password" autocomplete="new-password" minlength="6">
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-block">
+                                <i class="fas fa-user-plus"></i> Register
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Dashboard Section (shown after login) -->
+            <section id="dashboardSection" class="dashboard" style="display: none;">
+                <!-- Welcome & Analytics Section -->
+                <div class="card welcome-card" style="grid-column: 1 / -1;">
+                    <div class="card-header">
+                        <h2><i class="fas fa-chart-line"></i> Welcome Dashboard & Analytics</h2>
+                        <button id="refreshAnalyticsBtn" class="btn btn-icon">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="welcomeContent" class="welcome-content">
+                            <div class="analytics-grid">
+                                <!-- Summary Cards -->
+                                <div class="stat-card">
+                                    <div class="stat-icon" style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);">
+                                        <i class="fas fa-dollar-sign"></i>
+                                    </div>
+                                    <div class="stat-info">
+                                        <h3 id="totalAmount">$0.00</h3>
+                                        <p>Total Expenses</p>
+                                    </div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-icon" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                                        <i class="fas fa-receipt"></i>
+                                    </div>
+                                    <div class="stat-info">
+                                        <h3 id="totalEntries">0</h3>
+                                        <p>Total Entries</p>
+                                    </div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-icon" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                                        <i class="fas fa-calculator"></i>
+                                    </div>
+                                    <div class="stat-info">
+                                        <h3 id="averageExpense">$0.00</h3>
+                                        <p>Average Expense</p>
+                                    </div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-icon" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+                                        <i class="fas fa-user"></i>
+                                    </div>
+                                    <div class="stat-info">
+                                        <h3 id="mostActivePayer">-</h3>
+                                        <p>Most Active Payer</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Charts Row -->
+                            <div class="charts-row">
+                                <div class="chart-card">
+                                    <h3><i class="fas fa-chart-pie"></i> Expenses by Payer</h3>
+                                    <canvas id="payerChart"></canvas>
+                                </div>
+                                <div class="chart-card">
+                                    <h3><i class="fas fa-chart-bar"></i> Daily Spending Trend</h3>
+                                    <canvas id="trendChart"></canvas>
+                                </div>
+                            </div>
+
+                            <!-- Detailed Analysis -->
+                            <div class="analysis-section">
+                                <h3><i class="fas fa-microscope"></i> Detailed Analysis</h3>
+                                <div class="analysis-grid">
+                                    <div class="analysis-card">
+                                        <h4><i class="fas fa-arrow-up"></i> Largest Expense</h4>
+                                        <div id="largestExpense" class="expense-detail">
+                                            <p class="loading-text">Loading...</p>
+                                        </div>
+                                    </div>
+                                    <div class="analysis-card">
+                                        <h4><i class="fas fa-arrow-down"></i> Smallest Expense</h4>
+                                        <div id="smallestExpense" class="expense-detail">
+                                            <p class="loading-text">Loading...</p>
+                                        </div>
+                                    </div>
+                                    <div class="analysis-card">
+                                        <h4><i class="fas fa-clock"></i> Recent Expenses</h4>
+                                        <div id="recentExpenses" class="recent-expenses-list">
+                                            <p class="loading-text">Loading...</p>
+                                        </div>
+                                    </div>
+                                    <div class="analysis-card">
+                                        <h4><i class="fas fa-users"></i> Spending by User</h4>
+                                        <div id="spendingByUser" class="user-spending-list">
+                                            <p class="loading-text">Loading...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Add Expense Card -->
+                <div class="card expense-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-plus-circle"></i> Add Expense</h2>
+                    </div>
+                    <div class="card-body">
+                        <form id="expenseForm" class="expense-form">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="payer">Who Paid?</label>
+                                    <input type="text" id="payer" required placeholder="e.g., alice">
+                                </div>
+                                <div class="form-group">
+                                    <label for="amount">Amount ($)</label>
+                                    <input type="number" id="amount" step="0.01" min="0.01" required placeholder="0.00">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="description">Description</label>
+                                <input type="text" id="description" required placeholder="e.g., Dinner at restaurant">
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-block">
+                                <i class="fas fa-paper-plane"></i> Submit Expense
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Security Status Card -->
+                <div class="card security-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-shield-alt"></i> Security Status</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="security-features">
+                            <div class="security-item">
+                                <i class="fas fa-lock"></i>
+                                <div>
+                                    <strong>AES-256-GCM Encryption</strong>
+                                    <p>All messages encrypted end-to-end</p>
+                                </div>
+                            </div>
+                            <div class="security-item">
+                                <i class="fas fa-signature"></i>
+                                <div>
+                                    <strong>RSA-PSS Signatures</strong>
+                                    <p>Digital signatures for authentication</p>
+                                </div>
+                            </div>
+                            <div class="security-item">
+                                <i class="fas fa-link"></i>
+                                <div>
+                                    <strong>Hash Chain</strong>
+                                    <p>Tamper-evident ledger</p>
+                                </div>
+                            </div>
+                            <div class="security-item">
+                                <i class="fas fa-redo"></i>
+                                <div>
+                                    <strong>Replay Protection</strong>
+                                    <p>Monotonic counters prevent replay</p>
+                                </div>
+                            </div>
+                        </div>
+                        <button id="verifyTamperingBtn" class="btn btn-secondary btn-block">
+                            <i class="fas fa-search"></i> Verify Ledger Integrity
+                        </button>
+                        <div id="tamperingResult" class="tampering-result"></div>
+                    </div>
+                </div>
+
+                <!-- Ledger Card -->
+                <div class="card ledger-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-book"></i> Ledger</h2>
+                        <button id="refreshLedgerBtn" class="btn btn-icon">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="ledgerContent" class="ledger-content">
+                            <div class="loading-spinner">
+                                <i class="fas fa-spinner fa-spin"></i>
+                                <p>Loading ledger...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Blockchain Ledger Card -->
+                <div class="card blockchain-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-link"></i> Blockchain Ledger</h2>
+                        <button id="refreshBlockchainBtn" class="btn btn-icon">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="blockchainContent" class="blockchain-content">
+                            <div class="loading-spinner">
+                                <i class="fas fa-spinner fa-spin"></i>
+                                <p>Loading blockchain...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Security Explanation Card -->
+                <div class="card security-explanation-card" style="grid-column: 1 / -1;">
+                    <div class="card-header">
+                        <h2><i class="fas fa-shield-alt"></i> How Our Encryption Works & Why It's Secure</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="security-explanation">
+                            <!-- Three-Layer Security -->
+                            <div class="security-layer">
+                                <h3><i class="fas fa-layer-group"></i> Three-Layer Cryptographic Architecture</h3>
+                                <div class="layer-grid">
+                                    <div class="layer-item">
+                                        <div class="layer-number">1</div>
+                                        <h4>Handshake-Level Authentication</h4>
+                                        <p><strong>Signed Diffie-Hellman Key Exchange</strong></p>
+                                        <ul>
+                                            <li>Mutual authentication using RSA-PSS signatures</li>
+                                            <li>Establishes secure session with forward secrecy</li>
+                                            <li>Prevents man-in-the-middle attacks</li>
+                                        </ul>
+                                    </div>
+                                    <div class="layer-item">
+                                        <div class="layer-number">2</div>
+                                        <h4>Per-Entry Authentication</h4>
+                                        <p><strong>Digital Signatures on Each Expense</strong></p>
+                                        <ul>
+                                            <li>RSA-PSS signatures provide non-repudiation</li>
+                                            <li>Origin verification prevents spoofing</li>
+                                            <li>Each entry cryptographically signed</li>
+                                        </ul>
+                                    </div>
+                                    <div class="layer-item">
+                                        <div class="layer-number">3</div>
+                                        <h4>Per-Message Protection</h4>
+                                        <p><strong>Multiple Encryption Algorithms</strong></p>
+                                        <ul>
+                                            <li>AES-256-GCM for large messages</li>
+                                            <li>ChaCha20-Poly1305 for small messages</li>
+                                            <li>AES-256-CBC-HMAC for compatibility</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Encryption Algorithms -->
+                            <div class="security-section">
+                                <h3><i class="fas fa-key"></i> Encryption Algorithms</h3>
+                                <div class="algorithm-grid">
+                                    <div class="algorithm-card">
+                                        <h4><i class="fas fa-lock"></i> AES-256-GCM</h4>
+                                        <p><strong>Authenticated Encryption</strong></p>
+                                        <ul>
+                                            <li>256-bit key strength</li>
+                                            <li>Provides confidentiality AND authenticity</li>
+                                            <li>Hardware-accelerated on modern CPUs</li>
+                                            <li>Best for: Large messages (>10KB)</li>
+                                        </ul>
+                                    </div>
+                                    <div class="algorithm-card">
+                                        <h4><i class="fas fa-mobile-alt"></i> ChaCha20-Poly1305</h4>
+                                        <p><strong>Stream Cipher AEAD</strong></p>
+                                        <ul>
+                                            <li>256-bit key strength</li>
+                                            <li>Resistant to timing attacks</li>
+                                            <li>Excellent software performance</li>
+                                            <li>Best for: Small messages (<1KB), mobile devices</li>
+                                        </ul>
+                                    </div>
+                                    <div class="algorithm-card">
+                                        <h4><i class="fas fa-shield-virus"></i> AES-256-CBC-HMAC</h4>
+                                        <p><strong>Encrypt-then-MAC</strong></p>
+                                        <ul>
+                                            <li>256-bit encryption + 256-bit MAC</li>
+                                            <li>Strong security with proper implementation</li>
+                                            <li>Compatibility with legacy systems</li>
+                                            <li>Best for: Compatibility requirements</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Blockchain Security -->
+                            <div class="security-section">
+                                <h3><i class="fas fa-link"></i> Blockchain Ledger Security</h3>
+                                <div class="blockchain-explanation">
+                                    <div class="blockchain-feature">
+                                        <i class="fas fa-fingerprint"></i>
+                                        <div>
+                                            <h4>Hash Chain</h4>
+                                            <p>Each block contains the hash of the previous block, creating an immutable chain. Any modification breaks the chain and is immediately detected.</p>
+                                        </div>
+                                    </div>
+                                    <div class="blockchain-feature">
+                                        <i class="fas fa-tree"></i>
+                                        <div>
+                                            <h4>Merkle Root</h4>
+                                            <p>Each block includes a Merkle root hash, allowing efficient verification of block contents without processing all transactions.</p>
+                                        </div>
+                                    </div>
+                                    <div class="blockchain-feature">
+                                        <i class="fas fa-signature"></i>
+                                        <div>
+                                            <h4>Digital Signatures</h4>
+                                            <p>Every expense is signed with the user's private key, providing non-repudiation and preventing unauthorized entries.</p>
+                                        </div>
+                                    </div>
+                                    <div class="blockchain-feature">
+                                        <i class="fas fa-ban"></i>
+                                        <div>
+                                            <h4>Tamper Detection</h4>
+                                            <p>The blockchain structure makes tampering computationally infeasible. Any modification requires recomputing all subsequent blocks.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Attack Protection -->
+                            <div class="security-section">
+                                <h3><i class="fas fa-user-shield"></i> Protection Against Attacks</h3>
+                                <div class="attack-protection-grid">
+                                    <div class="protection-item">
+                                        <i class="fas fa-eye-slash"></i>
+                                        <h4>Eavesdropping</h4>
+                                        <p>All messages encrypted end-to-end. Attackers see only ciphertext.</p>
+                                    </div>
+                                    <div class="protection-item">
+                                        <i class="fas fa-edit"></i>
+                                        <h4>Modification</h4>
+                                        <p>Authentication tags detect any changes. Modified messages are rejected.</p>
+                                    </div>
+                                    <div class="protection-item">
+                                        <i class="fas fa-user-secret"></i>
+                                        <h4>Spoofing</h4>
+                                        <p>Digital signatures verify identity. Cannot impersonate without private key.</p>
+                                    </div>
+                                    <div class="protection-item">
+                                        <i class="fas fa-redo"></i>
+                                        <h4>Replay</h4>
+                                        <p>Monotonic counters prevent replay. Old messages are rejected.</p>
+                                    </div>
+                                    <div class="protection-item">
+                                        <i class="fas fa-database"></i>
+                                        <h4>Tampering</h4>
+                                        <p>Hash chain detects database modifications. Chain breaks on tampering.</p>
+                                    </div>
+                                    <div class="protection-item">
+                                        <i class="fas fa-bomb"></i>
+                                        <h4>DoS/Brute Force</h4>
+                                        <p>Rate limiting prevents brute force attacks. Request limits protect availability.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Security Properties -->
+                            <div class="security-section">
+                                <h3><i class="fas fa-check-circle"></i> Security Properties</h3>
+                                <div class="properties-list">
+                                    <div class="property-item">
+                                        <i class="fas fa-check"></i>
+                                        <span><strong>Confidentiality:</strong> All expense data encrypted with AES-256-GCM or ChaCha20-Poly1305</span>
+                                    </div>
+                                    <div class="property-item">
+                                        <i class="fas fa-check"></i>
+                                        <span><strong>Integrity:</strong> Modifications detected via GCM tags, HMAC, and signatures</span>
+                                    </div>
+                                    <div class="property-item">
+                                        <i class="fas fa-check"></i>
+                                        <span><strong>Authentication:</strong> Each entry signed by user's private key</span>
+                                    </div>
+                                    <div class="property-item">
+                                        <i class="fas fa-check"></i>
+                                        <span><strong>Non-repudiation:</strong> Digital signatures provide proof of origin</span>
+                                    </div>
+                                    <div class="property-item">
+                                        <i class="fas fa-check"></i>
+                                        <span><strong>Replay Protection:</strong> Monotonic counters prevent replay</span>
+                                    </div>
+                                    <div class="property-item">
+                                        <i class="fas fa-check"></i>
+                                        <span><strong>Tamper Evidence:</strong> Hash chain detects ledger modifications</span>
+                                    </div>
+                                    <div class="property-item">
+                                        <i class="fas fa-check"></i>
+                                        <span><strong>Forward Secrecy:</strong> Ephemeral DH keys protect past sessions</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Balances Card -->
+                <div class="card balances-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-balance-scale"></i> Balances</h2>
+                        <button id="refreshBalancesBtn" class="btn btn-icon">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="balancesContent" class="balances-content">
+                            <div class="loading-spinner">
+                                <i class="fas fa-spinner fa-spin"></i>
+                                <p>Loading balances...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Toast Notifications -->
+        <div id="toastContainer" class="toast-container"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
+

@@ -22,8 +22,9 @@ wheels/
 
 # Virtual Environment
 venv/
-ENV/
 env/
+ENV/
+.venv
 
 # IDE
 .vscode/
@@ -36,19 +37,27 @@ env/
 *.db
 *.sqlite
 *.sqlite3
+data/
 
-# Keys (sensitive)
-keys/*.pem
-!keys/.gitkeep
+# Keys
+keys/
+*.pem
+*.key
 
-# Data
-data/*.db
-!data/.gitkeep
+# Environment
+.env
+.env.local
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Project specific
-*.pdf
-PROJECT_STATUS.md
+# Logs
+*.log
+
+# Deployment
+.railway/
+.fly/
+
+# PowerPoint (optional - remove if you want to commit)
+*.pptx

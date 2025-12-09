@@ -88,10 +88,32 @@ def demo_basic_functionality():
     print(f"\n{Fore.MAGENTA}Alice pays for coffee...{Style.RESET_ALL}")
     clients["alice"].add_expense("alice", 15.75, "Coffee shop")
     
-    print_header("Phase 4: Viewing Ledger")
+    print_header("Phase 4: Viewing Blockchain Ledger")
     
-    print(f"\n{Fore.MAGENTA}Alice viewing ledger...{Style.RESET_ALL}")
+    print(f"\n{Fore.MAGENTA}Alice viewing blockchain ledger...{Style.RESET_ALL}")
     clients["alice"].view_ledger()
+    
+    # Show blockchain info
+    print(f"\n{Fore.MAGENTA}Blockchain Information:{Style.RESET_ALL}")
+    blockchain_info = server.ledger.get_blockchain_info()
+    print(f"  Total Blocks: {blockchain_info['total_blocks']}")
+    print(f"  Chain Length: {blockchain_info['chain_length']}")
+    print(f"  Chain Valid: {'✓ Yes' if blockchain_info['is_valid'] else '✗ No'}")
+    print(f"  Genesis Hash: {blockchain_info['genesis_hash'][:32]}...")
+    if blockchain_info['latest_block_hash']:
+        print(f"  Latest Block Hash: {blockchain_info['latest_block_hash'][:32]}...")
+    
+    # Show block details
+    entries = server.ledger.get_all_entries()
+    if entries:
+        print(f"\n{Fore.MAGENTA}Block Details:{Style.RESET_ALL}")
+        for entry in entries[-3:]:  # Show last 3 blocks
+            block_height = entry.get('block_height', entry.get('id', 0))
+            block_hash = entry.get('block_hash', entry.get('entry_hash', ''))
+            print(f"  Block #{block_height}: {entry['payer']} paid ${entry['amount']:.2f}")
+            print(f"    Hash: {block_hash[:32]}...")
+            if entry.get('prev_hash'):
+                print(f"    Prev Hash: {entry['prev_hash'][:32]}...")
     
     print_header("Phase 5: Calculating Balances")
     
@@ -100,12 +122,14 @@ def demo_basic_functionality():
     
     print_header("Demo Complete")
     print_success("All operations completed successfully!")
-    print_info("The ledger is cryptographically secured with:")
-    print("  • End-to-end encryption (AES-256-GCM)")
+    print_info("The blockchain ledger is cryptographically secured with:")
+    print("  • Multiple encryption algorithms (AES-256-GCM, ChaCha20-Poly1305, AES-CBC-HMAC)")
     print("  • Digital signatures (RSA-PSS)")
-    print("  • Hash chain for tamper evidence")
-    print("  • Replay protection via counters")
-    print("  • Authenticated key exchange (Signed DH)")
+    print("  • Blockchain hash chain for tamper evidence")
+    print("  • Merkle roots for efficient verification")
+    print("  • Replay protection via monotonic counters")
+    print("  • Authenticated key exchange (Signed Diffie-Hellman)")
+    print("  • Three-layer cryptographic architecture")
 
 
 def demo_attack_scenarios():

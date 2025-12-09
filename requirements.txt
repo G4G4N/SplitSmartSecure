@@ -10,3 +10,10 @@ click>=8.1.0
 
 # For colored terminal output
 colorama>=0.4.6
+
+# For web application
+Flask>=3.0.0
+flask-cors>=4.0.0
+
+# For password hashing
+bcrypt>=4.0.0

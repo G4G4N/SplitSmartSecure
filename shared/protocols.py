@@ -234,20 +234,23 @@ class ErrorMessage(ProtocolMessage):
 
 class EncryptedMessage:
     """
-    Wrapper for encrypted messages.
+    Wrapper for encrypted messages with algorithm selection.
     
     Structure:
-        - nonce: GCM nonce (base64)
+        - algorithm: Encryption algorithm used (AES-256-GCM, ChaCha20-Poly1305, AES-256-CBC-HMAC-SHA256)
+        - nonce: Nonce/IV (base64)
         - ciphertext: Encrypted payload with auth tag (base64)
     """
     
-    def __init__(self, nonce: str, ciphertext: str):
+    def __init__(self, nonce: str, ciphertext: str, algorithm: str = "AES-256-GCM"):
         self.nonce = nonce
         self.ciphertext = ciphertext
+        self.algorithm = algorithm
     
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
+            "algorithm": self.algorithm,
             "nonce": self.nonce,
             "ciphertext": self.ciphertext
         }
@@ -270,7 +273,8 @@ class EncryptedMessage:
         """Create from dictionary."""
         return EncryptedMessage(
             nonce=msg_dict["nonce"],
-            ciphertext=msg_dict["ciphertext"]
+            ciphertext=msg_dict["ciphertext"],
+            algorithm=msg_dict.get("algorithm", "AES-256-GCM")
         )
 
 

@@ -162,7 +162,12 @@ class SplitSmartClient:
         # Check if response is encrypted or plain error
         if "nonce" in response_dict and "ciphertext" in response_dict:
             # Decrypt response
-            plaintext = self.crypto.decrypt_message(response_dict["nonce"], response_dict["ciphertext"])
+            algorithm = response_dict.get("algorithm", "AES-256-GCM")  # Default for backward compatibility
+            plaintext = self.crypto.decrypt_message(
+                response_dict["nonce"], 
+                response_dict["ciphertext"],
+                algorithm
+            )
             if plaintext is None:
                 print("[Client] Failed to decrypt response")
                 return False
@@ -211,7 +216,12 @@ class SplitSmartClient:
         
         # Check if response is encrypted or plain error
         if "nonce" in response_dict and "ciphertext" in response_dict:
-            plaintext = self.crypto.decrypt_message(response_dict["nonce"], response_dict["ciphertext"])
+            algorithm = response_dict.get("algorithm", "AES-256-GCM")  # Default for backward compatibility
+            plaintext = self.crypto.decrypt_message(
+                response_dict["nonce"], 
+                response_dict["ciphertext"],
+                algorithm
+            )
             if plaintext is None:
                 print("[Client] Failed to decrypt response")
                 return None
@@ -318,7 +328,12 @@ class SplitSmartClient:
         
         # Check if response is encrypted or plain error
         if "nonce" in response_dict and "ciphertext" in response_dict:
-            plaintext = self.crypto.decrypt_message(response_dict["nonce"], response_dict["ciphertext"])
+            algorithm = response_dict.get("algorithm", "AES-256-GCM")  # Default for backward compatibility
+            plaintext = self.crypto.decrypt_message(
+                response_dict["nonce"], 
+                response_dict["ciphertext"],
+                algorithm
+            )
             if plaintext is None:
                 print("[Client] Failed to decrypt response")
                 return None

@@ -74,20 +74,32 @@ def demo_eavesdropping():
     # Send the encrypted message to server
     response = server.process_message(alice.crypto.session_id, encrypted)
     if response:
-        plaintext = alice.crypto.decrypt_message(response["nonce"], response["ciphertext"])
+        # Handle algorithm field
+        algorithm = response.get("algorithm", "AES-256-GCM")
+        plaintext = alice.crypto.decrypt_message(
+            response["nonce"], 
+            response["ciphertext"],
+            algorithm
+        )
         if plaintext:
             from shared.protocols import ProtocolMessage
             response_msg = ProtocolMessage.from_bytes(plaintext)
             if response_msg.msg_type == "EXPENSE_SUBMIT_RESPONSE":
                 print("   ✓ Server successfully decrypted and processed the expense")
                 print(f"   Entry ID: {response_msg.payload.get('entry_id')}")
+                print(f"   Algorithm used: {algorithm}")
             else:
                 print("   ✓ Server successfully decrypted the message")
+                print(f"   Algorithm used: {algorithm}")
     
     print_header("RESULT: Confidentiality Preserved")
-    print("✓ AES-256-GCM encryption protects against eavesdropping")
-    print("✓ Attacker cannot read message contents")
+    print("✓ Multiple encryption algorithms protect against eavesdropping:")
+    print("  • AES-256-GCM: Hardware-accelerated, best for large messages")
+    print("  • ChaCha20-Poly1305: Fast software implementation, best for small messages")
+    print("  • AES-256-CBC-HMAC: Compatibility option")
+    print("✓ Attacker cannot read message contents without session key")
     print("✓ Only parties with the session key can decrypt")
+    print("✓ Algorithm automatically selected based on message size")
 
 if __name__ == "__main__":
     demo_eavesdropping()

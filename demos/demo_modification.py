@@ -102,7 +102,12 @@ def demo_modification():
         # Check if response is encrypted or plain error
         if "nonce" in response and "ciphertext" in response:
             # Encrypted response - try to decrypt
-            plaintext = alice.crypto.decrypt_message(response["nonce"], response["ciphertext"])
+            algorithm = response.get("algorithm", "AES-256-GCM")
+            plaintext = alice.crypto.decrypt_message(
+                response["nonce"], 
+                response["ciphertext"],
+                algorithm
+            )
             if plaintext:
                 from shared.protocols import ProtocolMessage
                 response_msg = ProtocolMessage.from_bytes(plaintext)
@@ -110,7 +115,7 @@ def demo_modification():
                 if response_msg.msg_type == "ERROR":
                     print(f"   ✓ Error Detected: {response_msg.payload.get('message', 'Unknown error')}")
                     print("\n   SERVER REJECTED THE MODIFIED MESSAGE!")
-                    print("   Reason: GCM authentication tag verification failed")
+                    print(f"   Reason: {algorithm} authentication tag verification failed")
         else:
             # Unencrypted error response (decryption failed)
             print(f"   Message Type: {response.get('msg_type', 'ERROR')}")
@@ -132,16 +137,25 @@ def demo_modification():
     response = server.process_message(alice.crypto.session_id, encrypted)
     
     if response:
-        plaintext = alice.crypto.decrypt_message(response["nonce"], response["ciphertext"])
+        algorithm = response.get("algorithm", "AES-256-GCM")
+        plaintext = alice.crypto.decrypt_message(
+            response["nonce"], 
+            response["ciphertext"],
+            algorithm
+        )
         if plaintext:
             from shared.protocols import ProtocolMessage
             response_msg = ProtocolMessage.from_bytes(plaintext)
             if response_msg.msg_type == "EXPENSE_SUBMIT_RESPONSE":
                 print("    ✓ Original message accepted successfully")
                 print(f"    Entry ID: {response_msg.payload.get('entry_id')}")
+                print(f"    Algorithm used: {algorithm}")
     
     print_header("RESULT: Integrity Protection Successful")
-    print("✓ AES-256-GCM authentication tag detects modifications")
+    print("✓ Multiple encryption algorithms detect modifications:")
+    print("  • AES-256-GCM: GCM authentication tag detects modifications")
+    print("  • ChaCha20-Poly1305: Poly1305 MAC detects modifications")
+    print("  • AES-256-CBC-HMAC: HMAC-SHA256 detects modifications")
     print("✓ Modified messages are rejected by the server")
     print("✓ Attacker cannot forge valid authentication tags")
     print("✓ Only authentic, unmodified messages are accepted")
@@ -149,11 +163,12 @@ def demo_modification():
     print("\n" + "=" * 80)
     print("Technical Details:".center(80))
     print("=" * 80)
-    print("• AES-GCM provides AEAD (Authenticated Encryption with Associated Data)")
-    print("• Authentication tag is computed over ciphertext using session key")
+    print("• All algorithms provide AEAD (Authenticated Encryption with Associated Data)")
+    print("• Authentication tags/MACs computed over ciphertext using session key")
     print("• Any modification to ciphertext causes tag verification to fail")
     print("• Attacker cannot compute valid tag without knowing the session key")
     print("• This prevents both passive eavesdropping AND active modification")
+    print("• Algorithm automatically selected based on message size")
     print("=" * 80)
 
 if __name__ == "__main__":

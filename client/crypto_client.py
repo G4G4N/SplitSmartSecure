@@ -159,33 +159,39 @@ class ClientCrypto:
         
         return True
     
-    def encrypt_message(self, plaintext: bytes) -> Dict[str, str]:
+    def encrypt_message(self, plaintext: bytes, algorithm: Optional[str] = None) -> Dict[str, str]:
         """
-        Encrypt message with session key.
+        Encrypt message with session key using selected algorithm.
         
         Args:
             plaintext: Message to encrypt
+            algorithm: Encryption algorithm (auto-select if None)
             
         Returns:
-            Dictionary with nonce and ciphertext (base64)
+            Dictionary with algorithm, nonce, and ciphertext (base64)
         """
         if not self.session_key:
             raise ValueError("No active session")
         
-        nonce, ciphertext = CryptoPrimitives.aes_gcm_encrypt(self.session_key, plaintext)
+        # Use new encryption method with algorithm selection
+        algo, nonce_iv, ciphertext = CryptoPrimitives.encrypt_message(
+            self.session_key, plaintext, algorithm
+        )
         
         return {
-            "nonce": MessageEncoder.b64encode(nonce),
+            "algorithm": algo,
+            "nonce": MessageEncoder.b64encode(nonce_iv),
             "ciphertext": MessageEncoder.b64encode(ciphertext)
         }
     
-    def decrypt_message(self, nonce_b64: str, ciphertext_b64: str) -> Optional[bytes]:
+    def decrypt_message(self, nonce_b64: str, ciphertext_b64: str, algorithm: Optional[str] = None) -> Optional[bytes]:
         """
         Decrypt message with session key.
         
         Args:
-            nonce_b64: Nonce (base64)
+            nonce_b64: Nonce/IV (base64)
             ciphertext_b64: Ciphertext with tag (base64)
+            algorithm: Encryption algorithm (defaults to AES-256-GCM for backward compatibility)
             
         Returns:
             Plaintext bytes or None if decryption fails
@@ -193,10 +199,16 @@ class ClientCrypto:
         if not self.session_key:
             raise ValueError("No active session")
         
-        nonce = MessageEncoder.b64decode(nonce_b64)
+        nonce_iv = MessageEncoder.b64decode(nonce_b64)
         ciphertext = MessageEncoder.b64decode(ciphertext_b64)
         
-        plaintext = CryptoPrimitives.aes_gcm_decrypt(self.session_key, nonce, ciphertext)
+        # Default to AES-GCM for backward compatibility
+        if algorithm is None:
+            algorithm = "AES-256-GCM"
+        
+        plaintext = CryptoPrimitives.decrypt_message(
+            self.session_key, algorithm, nonce_iv, ciphertext
+        )
         return plaintext
     
     def sign_expense(self, payer: str, amount: float, description: str, timestamp: str) -> Tuple[str, int]:
