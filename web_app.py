@@ -46,6 +46,11 @@ _server_lock = threading.Lock()
 _rate_limit_store = defaultdict(list)
 _rate_limit_lock = threading.Lock()
 
+# Replay protection storage (request hash -> timestamp)
+_replay_protection_store = {}
+_replay_protection_lock = threading.Lock()
+REPLAY_PROTECTION_WINDOW = 300  # 5 minutes in seconds
+
 # API security configuration
 RATE_LIMIT_REQUESTS = 100  # requests per window
 RATE_LIMIT_WINDOW = 60  # seconds
@@ -385,9 +390,39 @@ def api_add_expense():
         if amount <= 0 or amount > MAX_AMOUNT:
             return jsonify({'success': False, 'error': f'Amount must be between $0.01 and ${MAX_AMOUNT:,.2f}'}), 400
         
+        # REPLAY PROTECTION: Create hash of request content
+        # Hash includes: username, payer, amount, description
+        # This prevents the exact same request from being processed multiple times
+        request_content = f"{username}:{payer}:{amount:.2f}:{description}"
+        request_hash = hashlib.sha256(request_content.encode('utf-8')).hexdigest()
+        
+        current_time = time.time()
+        
+        # Check for replay attack
+        with _replay_protection_lock:
+            # Clean old entries (older than REPLAY_PROTECTION_WINDOW)
+            expired_keys = [
+                key for key, timestamp in _replay_protection_store.items()
+                if current_time - timestamp > REPLAY_PROTECTION_WINDOW
+            ]
+            for key in expired_keys:
+                del _replay_protection_store[key]
+            
+            # Check if this request was already processed successfully
+            if request_hash in _replay_protection_store:
+                # Request was seen recently - this is a replay attack
+                return jsonify({
+                    'success': False,
+                    'error': 'Replay attack detected: This exact request was already processed recently'
+                }), 409  # 409 Conflict
+        
         success = client.add_expense(payer, amount, description)
         
         if success:
+            # Only store hash if request succeeded (prevents replay of successful requests)
+            with _replay_protection_lock:
+                _replay_protection_store[request_hash] = current_time
+            
             return jsonify({
                 'success': True,
                 'message': f'Expense added: {payer} paid ${amount:.2f} for {description}'
