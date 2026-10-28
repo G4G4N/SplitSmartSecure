@@ -55,6 +55,9 @@ KEYS_DIR = "keys"
 DATA_DIR = "data"
 DB_FILE = "data/splitsmart.db"
 
+# AI security layer
+AI_SECURITY_ENABLED = True  # Set False to bypass anomaly/threat checks at the protocol level
+
 # Protocol message types
 MSG_TYPE_CLIENT_HELLO = "CLIENT_HELLO"
 MSG_TYPE_SERVER_HELLO = "SERVER_HELLO"
@@ -74,3 +77,4 @@ ERROR_DECRYPTION_FAILED = "DECRYPTION_FAILED"
 ERROR_HASH_CHAIN_BROKEN = "HASH_CHAIN_BROKEN"
 ERROR_USER_NOT_FOUND = "USER_NOT_FOUND"
 ERROR_INVALID_MESSAGE = "INVALID_MESSAGE"
+ERROR_SECURITY_POLICY = "SECURITY_POLICY_VIOLATION"  # Rejected by the AI security layer

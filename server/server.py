@@ -22,8 +22,10 @@ from shared.constants import (
     MSG_TYPE_LEDGER_REQUEST, MSG_TYPE_BALANCE_REQUEST,
     ERROR_INVALID_SIGNATURE, ERROR_REPLAY_DETECTED,
     ERROR_INVALID_COUNTER, ERROR_DECRYPTION_FAILED,
-    ERROR_USER_NOT_FOUND, ERROR_INVALID_MESSAGE
+    ERROR_USER_NOT_FOUND, ERROR_INVALID_MESSAGE,
+    ERROR_SECURITY_POLICY, AI_SECURITY_ENABLED
 )
+from ai_security import AISecurityEngine
 
 from .storage import Storage
 from .ledger import Ledger
@@ -33,9 +35,14 @@ from .crypto_server import ServerCrypto
 class SplitSmartServer:
     """Main server application."""
     
-    def __init__(self):
-        """Initialize server."""
-        self.storage = Storage()
+    def __init__(self, db_path: Optional[str] = None):
+        """
+        Initialize server.
+        
+        Args:
+            db_path: Optional SQLite path (defaults to shared.constants.DB_FILE)
+        """
+        self.storage = Storage(db_path) if db_path else Storage()
         self.ledger = Ledger(self.storage)
         self.crypto = ServerCrypto()
         
@@ -44,6 +51,16 @@ class SplitSmartServer:
         
         # Verify ledger integrity on startup
         self._verify_ledger_on_startup()
+        
+        # AI security layer: learns behavioural baselines from the ledger and
+        # screens every submission for anomalies and injection payloads.
+        self.ai_security = AISecurityEngine(self.storage)
+        anomaly_info = self.ai_security.anomaly.info
+        classifier_info = self.ai_security.classifier.info
+        print(f"[Server] AI security engine ready "
+              f"({anomaly_info['entries_learned']} baseline entries, "
+              f"{classifier_info['training_samples']} training samples, "
+              f"{classifier_info['signature_rules']} threat signatures)")
     
     def _verify_ledger_on_startup(self):
         """Verify ledger integrity on server startup."""
@@ -72,6 +89,8 @@ class SplitSmartServer:
         success = self.storage.register_user(user_id, public_key_pem, password_hash)
         if success:
             print(f"[Server] Registered user: {user_id}")
+            # Keep the AI payer graph in sync so the new member is not flagged as unknown
+            self.ai_security.anomaly.register_users([user_id])
         else:
             print(f"[Server] User already exists: {user_id}")
         return success
@@ -107,6 +126,8 @@ class SplitSmartServer:
         # Get user's public key
         user_public_key_pem = self.storage.get_user_public_key(user_id)
         if not user_public_key_pem:
+            self.ai_security.record_event("login_failed", client_id=f"user:{user_id}", user_id=user_id,
+                                          details={"reason": "unknown user in CLIENT_HELLO"})
             return ErrorMessage(ERROR_USER_NOT_FOUND, f"User {user_id} not found")
         
         # Load user's public key
@@ -118,6 +139,8 @@ class SplitSmartServer:
         )
         
         if not server_hello_data:
+            self.ai_security.record_event("signature_invalid", client_id=f"user:{user_id}", user_id=user_id,
+                                          details={"stage": "handshake", "reason": "client DH signature failed"})
             return ErrorMessage(ERROR_INVALID_SIGNATURE, "Failed to verify client signature")
         
         # Create server hello message
@@ -150,9 +173,22 @@ class SplitSmartServer:
         # Get session
         session = self.crypto.get_session(session_id)
         if not session:
+            self.ai_security.record_event("invalid_session", client_id=f"session:{session_id}",
+                                          details={"stage": "expense_submit"})
             return ErrorMessage(ERROR_INVALID_MESSAGE, "Invalid or expired session")
         
         user_id = session["user_id"]
+        client_id = f"user:{user_id}"
+        
+        # AI SECURITY: adaptive response. An identity whose intrusion score crossed
+        # the block threshold (repeated injections, replays, bad signatures, ...)
+        # is refused for a cooling-off period, even with a valid session.
+        if AI_SECURITY_ENABLED and self.ai_security.is_blocked(client_id):
+            verdict = self.ai_security.evaluate_client(client_id)
+            print(f"[Server] ✗ AI security refused expense from blocked identity {user_id}")
+            return ErrorMessage(ERROR_SECURITY_POLICY,
+                                f"AI Security: {user_id} is temporarily blocked after repeated suspicious "
+                                f"activity (retry in {verdict.retry_after}s)")
         
         # Get user's public key
         user_public_key_pem = self.storage.get_user_public_key(user_id)
@@ -161,6 +197,8 @@ class SplitSmartServer:
         # Verify counter (replay protection)
         stored_counter = self.storage.get_user_counter(user_id)
         if counter <= stored_counter:
+            self.ai_security.record_event("replay_detected", client_id=client_id, user_id=user_id,
+                                          details={"counter": counter, "stored_counter": stored_counter})
             return ErrorMessage(ERROR_REPLAY_DETECTED, f"Invalid counter: {counter} <= {stored_counter}")
         
         # Verify signature (use timestamp from payload, not message wrapper)
@@ -168,7 +206,22 @@ class SplitSmartServer:
         signature = MessageEncoder.b64decode(signature_b64)
         
         if not CryptoPrimitives.verify_signature(user_public_key, expense_data, signature):
+            self.ai_security.record_event("signature_invalid", client_id=client_id, user_id=user_id,
+                                          details={"stage": "expense_submit", "payer": payer,
+                                                   "amount": amount, "description": description})
             return ErrorMessage(ERROR_INVALID_SIGNATURE, "Invalid expense signature")
+        
+        # AI SECURITY: behavioural anomaly scoring + injection payload classification.
+        # Runs after the cryptographic checks so only authentic, non-replayed
+        # submissions from the real user are scored against their baseline.
+        assessment = None
+        if AI_SECURITY_ENABLED:
+            assessment = self.ai_security.assess_expense(user_id, payer, amount, description, timestamp)
+            if assessment.blocked:
+                self.ai_security.commit_expense(assessment, client_id=client_id,
+                                                timestamp=timestamp, accepted=False)
+                print(f"[Server] ✗ AI security rejected expense from {user_id}: {assessment.block_reason}")
+                return ErrorMessage(ERROR_SECURITY_POLICY, assessment.block_reason)
         
         # Add to ledger (use timestamp from payload)
         entry_result = self.ledger.add_entry(
@@ -189,6 +242,14 @@ class SplitSmartServer:
         
         print(f"[Server] Added expense entry {entry_result['id']} from {user_id}")
         
+        # Let the AI security layer learn from the accepted entry and log any flags
+        if assessment is not None:
+            self.ai_security.commit_expense(assessment, client_id=client_id, timestamp=timestamp,
+                                            entry_id=entry_result["id"])
+            if assessment.flagged:
+                print(f"[Server] ⚠ AI security flagged entry {entry_result['id']}: "
+                      f"{assessment.risk_level} risk (score {assessment.risk_score:.0f}/100)")
+        
         # Generate cryptographic receipt (server signs the entry)
         receipt_timestamp = datetime.utcnow().isoformat()
         receipt_data = create_receipt_data_for_signing(
@@ -206,7 +267,8 @@ class SplitSmartServer:
             entry_id=entry_result["id"],
             entry_hash=entry_result["entry_hash"],
             receipt=receipt_b64,
-            receipt_timestamp=receipt_timestamp
+            receipt_timestamp=receipt_timestamp,
+            security=assessment.to_dict() if assessment is not None else None
         )
     
     def handle_ledger_request(self, session_id: str, message: ProtocolMessage) -> ProtocolMessage:
@@ -226,6 +288,7 @@ class SplitSmartServer:
         # Get session
         session = self.crypto.get_session(session_id)
         if not session:
+            self.ai_security.record_event("invalid_session", client_id=f"session:{session_id}")
             return ErrorMessage(ERROR_INVALID_MESSAGE, "Invalid or expired session")
         
         user_id = session["user_id"]
@@ -233,6 +296,8 @@ class SplitSmartServer:
         # Verify counter
         stored_counter = self.storage.get_user_counter(user_id)
         if counter <= stored_counter:
+            self.ai_security.record_event("replay_detected", client_id=f"user:{user_id}", user_id=user_id,
+                                          details={"counter": counter, "stored_counter": stored_counter})
             return ErrorMessage(ERROR_REPLAY_DETECTED, f"Invalid counter: {counter} <= {stored_counter}")
         
         # Update counter
@@ -265,6 +330,7 @@ class SplitSmartServer:
         # Get session
         session = self.crypto.get_session(session_id)
         if not session:
+            self.ai_security.record_event("invalid_session", client_id=f"session:{session_id}")
             return ErrorMessage(ERROR_INVALID_MESSAGE, "Invalid or expired session")
         
         user_id = session["user_id"]
@@ -272,6 +338,8 @@ class SplitSmartServer:
         # Verify counter
         stored_counter = self.storage.get_user_counter(user_id)
         if counter <= stored_counter:
+            self.ai_security.record_event("replay_detected", client_id=f"user:{user_id}", user_id=user_id,
+                                          details={"counter": counter, "stored_counter": stored_counter})
             return ErrorMessage(ERROR_REPLAY_DETECTED, f"Invalid counter: {counter} <= {stored_counter}")
         
         # Update counter
@@ -318,6 +386,12 @@ class SplitSmartServer:
         )
         
         if plaintext is None:
+            # Authentication tag failure: the ciphertext was modified or forged
+            session = self.crypto.get_session(session_id)
+            user_id = session["user_id"] if session else None
+            self.ai_security.record_event("decryption_failed",
+                                          client_id=f"user:{user_id}" if user_id else f"session:{session_id}",
+                                          user_id=user_id, details={"algorithm": algorithm})
             error_response = ErrorMessage(ERROR_DECRYPTION_FAILED, "Failed to decrypt message")
             return error_response.to_dict()
         
@@ -351,6 +425,10 @@ class SplitSmartServer:
     def list_users(self) -> list:
         """Get list of registered users."""
         return self.storage.list_users()
+    
+    def get_security_dashboard(self) -> Dict[str, Any]:
+        """Get the AI security dashboard (threat level, stats, models, events)."""
+        return self.ai_security.get_dashboard()
 
 
 def main():

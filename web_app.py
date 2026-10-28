@@ -20,6 +20,8 @@ from typing import Optional
 
 from server.server import SplitSmartServer
 from client.client import SplitSmartClient
+from shared.constants import ERROR_SECURITY_POLICY
+from ai_security import config as ai_cfg
 
 app = Flask(__name__)
 # Use environment variable for secret key in production
@@ -68,6 +70,26 @@ def get_server():
             _server_instance = SplitSmartServer()
     return _server_instance
 
+def get_ai_security():
+    """Get the AI security engine attached to the server."""
+    return get_server().ai_security
+
+def client_fingerprint() -> str:
+    """
+    Identify the calling client for intrusion scoring.
+    Behind the hosting platform's proxy (production) the real address is in
+    X-Forwarded-For; locally the header is untrusted and remote_addr is used.
+    """
+    if is_production:
+        forwarded = request.headers.get('X-Forwarded-For', '')
+        if forwarded:
+            return forwarded.split(',')[0].strip()
+    return request.remote_addr or 'unknown'
+
+# Endpoints that a blocked client may not call (reads stay available so the UI
+# can still show the user why they are blocked).
+AI_PROTECTED_ENDPOINTS = {'api_login', 'api_register', 'api_add_expense', 'api_ai_security_analyze'}
+
 # Security decorators and utilities
 def rate_limit(max_requests: int = RATE_LIMIT_REQUESTS, window: int = RATE_LIMIT_WINDOW):
     """Rate limiting decorator."""
@@ -89,14 +111,23 @@ def rate_limit(max_requests: int = RATE_LIMIT_REQUESTS, window: int = RATE_LIMIT
                 ]
                 
                 # Check rate limit
-                if len(_rate_limit_store[client_id]) >= max_requests:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Rate limit exceeded. Please try again later.'
-                    }), 429
-                
-                # Add current request
-                _rate_limit_store[client_id].append(current_time)
+                limited = len(_rate_limit_store[client_id]) >= max_requests
+                if not limited:
+                    # Add current request
+                    _rate_limit_store[client_id].append(current_time)
+            
+            if limited:
+                # Feed the AI intrusion detector so persistent abusers escalate
+                try:
+                    get_ai_security().record_event('rate_limited', client_id=client_fingerprint(),
+                                                   user_id=session.get('user_id'),
+                                                   details={'endpoint': request.endpoint})
+                except Exception:
+                    pass
+                return jsonify({
+                    'success': False,
+                    'error': 'Rate limit exceeded. Please try again later.'
+                }), 429
             
             return f(*args, **kwargs)
         return decorated_function
@@ -170,6 +201,23 @@ def security_checks():
             'success': False,
             'error': 'Request too large'
         }), 413
+    
+    # AI SECURITY: adaptive intrusion response. Clients whose decaying risk
+    # score crossed the block threshold (brute force, credential stuffing,
+    # repeated tampering / injection attempts) are refused state-changing calls.
+    if request.endpoint in AI_PROTECTED_ENDPOINTS:
+        verdict = get_ai_security().evaluate_client(client_fingerprint())
+        g.ai_client_verdict = verdict
+        if verdict.blocked:
+            app.logger.warning(f"AI security blocked client {verdict.client_id}: {verdict.reasons}")
+            response = jsonify({
+                'success': False,
+                'error': 'AI Security: this client is temporarily blocked after repeated suspicious activity',
+                'client_action': verdict.action,
+                'retry_after': verdict.retry_after
+            })
+            response.headers['Retry-After'] = str(verdict.retry_after)
+            return response, 403
 
 @app.after_request
 def add_security_headers(response):
@@ -295,10 +343,22 @@ def api_login():
         password = data.get('password', '').strip()
         
         server = get_server()
+        engine = server.ai_security
+        
+        # AI SECURITY: tarpit clients the intrusion detector wants throttled,
+        # which makes password guessing slow without locking out real users.
+        verdict = getattr(g, 'ai_client_verdict', None)
+        if verdict is not None and verdict.throttled and ai_cfg.THROTTLE_DELAY_SECONDS > 0:
+            time.sleep(ai_cfg.THROTTLE_DELAY_SECONDS)
         
         # Verify password first
         if not server.verify_user_password(username, password):
-            return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
+            event = engine.record_event('login_failed', client_id=client_fingerprint(), user_id=username)
+            payload = {'success': False, 'error': 'Invalid username or password'}
+            if event['client_action'] != ai_cfg.CLIENT_ACTION_ALLOW:
+                payload['security_notice'] = (f"AI Security: repeated failed logins detected "
+                                              f"(response: {event['client_action']})")
+            return jsonify(payload), 401
         
         # Get or create client
         if username not in clients:
@@ -312,6 +372,7 @@ def api_login():
         
         if success:
             session['user_id'] = username
+            engine.record_event('login_success', client_id=client_fingerprint(), user_id=username)
             # Generate request integrity key for modification protection
             # This key is used to compute HMAC of request body
             integrity_key = os.urandom(32).hex()  # 256-bit key
@@ -431,6 +492,8 @@ def api_add_expense():
             if not hmac_lib.compare_digest(request_hmac, expected_hmac):
                 # Log for debugging
                 app.logger.warning(f"HMAC mismatch for user {username}")
+                get_ai_security().record_event('hmac_mismatch', client_id=client_fingerprint(), user_id=username,
+                                               details={'payer': payer, 'amount': amount, 'description': description})
                 app.logger.debug(f"Expected HMAC: {expected_hmac}")
                 app.logger.debug(f"Received HMAC: {request_hmac}")
                 app.logger.debug(f"Request body: {raw_request_body.decode('utf-8', errors='ignore')}")
@@ -462,12 +525,17 @@ def api_add_expense():
                 del _replay_protection_store[key]
             
             # Check if this request was already processed successfully
-            if request_hash in _replay_protection_store:
-                # Request was seen recently - this is a replay attack
-                return jsonify({
-                    'success': False,
-                    'error': 'Replay attack detected: This exact request was already processed recently'
-                }), 409  # 409 Conflict
+            replayed = request_hash in _replay_protection_store
+        
+        if replayed:
+            # Request was seen recently - this is a replay attack
+            get_ai_security().record_event('replay_detected', client_id=client_fingerprint(), user_id=username,
+                                           details={'payer': payer, 'amount': amount, 'description': description,
+                                                    'layer': 'web_api'})
+            return jsonify({
+                'success': False,
+                'error': 'Replay attack detected: This exact request was already processed recently'
+            }), 409  # 409 Conflict
         
         try:
             # Check if client has valid crypto session
@@ -478,6 +546,20 @@ def api_add_expense():
             app.logger.info(f"Attempting to add expense for {username}: {payer} paid ${amount:.2f} for {description}")
             app.logger.info(f"Session ID: {client.crypto.session_id}")
             
+            # AI SECURITY: score the submission (injection classifier + behavioural
+            # anomaly detection) before it is signed and sent through the protocol.
+            engine = get_ai_security()
+            assessment = engine.assess_expense(username, payer, amount, description)
+            if assessment.blocked:
+                engine.commit_expense(assessment, client_id=client_fingerprint(), accepted=False)
+                app.logger.warning(f"AI security rejected expense from {username}: {assessment.block_reason}")
+                status = 400 if assessment.threat.malicious else 403
+                return jsonify({
+                    'success': False,
+                    'error': assessment.block_reason,
+                    'security': assessment.to_dict()
+                }), status
+            
             success = client.add_expense(payer, amount, description)
             
             if success:
@@ -485,12 +567,28 @@ def api_add_expense():
                 with _replay_protection_lock:
                     _replay_protection_store[request_hash] = current_time
                 
-                app.logger.info(f"Expense added successfully for {username}")
-                return jsonify({
+                # The protocol server performed (and recorded) the authoritative assessment
+                security = (client.last_response or {}).get('security') or assessment.to_dict()
+                payload = {
                     'success': True,
-                    'message': f'Expense added: {payer} paid ${amount:.2f} for {description}'
-                })
+                    'message': f'Expense added: {payer} paid ${amount:.2f} for {description}',
+                    'security': security
+                }
+                if security.get('action') == 'flag':
+                    payload['warning'] = (f"AI Security flagged this expense as {security.get('risk_level')} risk "
+                                          f"(score {security.get('risk_score', 0):.0f}/100)")
+                app.logger.info(f"Expense added successfully for {username} "
+                                f"(AI risk {security.get('risk_level')}, score {security.get('risk_score')})")
+                return jsonify(payload)
             else:
+                last_error = client.last_error or {}
+                if last_error.get('error_code') == ERROR_SECURITY_POLICY:
+                    app.logger.warning(f"Protocol-level AI security rejection for {username}: {last_error.get('message')}")
+                    return jsonify({
+                        'success': False,
+                        'error': last_error.get('message', 'Rejected by AI security'),
+                        'security': assessment.to_dict()
+                    }), 403
                 app.logger.error(f"client.add_expense() returned False for user {username}")
                 app.logger.error(f"Session ID: {client.crypto.session_id}")
                 app.logger.error(f"Has session: {client.crypto.has_session()}")
@@ -638,6 +736,88 @@ def api_blockchain():
             'blockchain': blockchain_info,
             'blocks': entries[-10:] if len(entries) > 10 else entries  # Last 10 blocks
         })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ---------------------------------------------------------------------------
+# AI security endpoints
+# ---------------------------------------------------------------------------
+@app.route('/api/ai_security/status', methods=['GET'])
+def api_ai_security_status():
+    """AI security dashboard: threat level, counters, model info, recent events."""
+    try:
+        username = session.get('user_id')
+        if not username:
+            return jsonify({'success': False, 'error': 'Not logged in'}), 401
+        engine = get_ai_security()
+        dashboard = engine.get_dashboard()
+        dashboard['client'] = engine.evaluate_client(client_fingerprint()).to_dict()
+        return jsonify({'success': True, 'dashboard': dashboard})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ai_security/events', methods=['GET'])
+def api_ai_security_events():
+    """List recorded security events (newest first)."""
+    try:
+        username = session.get('user_id')
+        if not username:
+            return jsonify({'success': False, 'error': 'Not logged in'}), 401
+        try:
+            limit = max(1, min(int(request.args.get('limit', 50)), 200))
+        except ValueError:
+            limit = 50
+        severity = request.args.get('min_severity')
+        events = get_ai_security().get_events(limit=limit, min_severity=severity)
+        return jsonify({'success': True, 'events': events, 'count': len(events)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ai_security/analyze', methods=['POST'])
+@rate_limit(max_requests=30, window=60)
+def api_ai_security_analyze():
+    """
+    Dry-run analysis: score an expense (or classify a raw string) without
+    touching the ledger, baselines or event log counters other than dry_runs.
+    """
+    try:
+        username = session.get('user_id')
+        if not username:
+            return jsonify({'success': False, 'error': 'Not logged in'}), 401
+        if not request.is_json:
+            return jsonify({'success': False, 'error': 'Content-Type must be application/json'}), 400
+        data = request.json or {}
+        engine = get_ai_security()
+        
+        if 'text' in data and 'description' not in data:
+            text = sanitize_string(str(data.get('text', '')), MAX_DESCRIPTION_LENGTH)
+            return jsonify({'success': True, 'analysis': {'threat': engine.analyze_text(text)}})
+        
+        description = sanitize_string(str(data.get('description', '')), MAX_DESCRIPTION_LENGTH)
+        payer = sanitize_string(str(data.get('payer') or username), MAX_USERNAME_LENGTH)
+        try:
+            amount = float(data.get('amount', 0) or 0)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'Invalid amount'}), 400
+        if not description:
+            return jsonify({'success': False, 'error': 'description is required'}), 400
+        analysis = engine.analyze_expense(username, payer, amount, description)
+        return jsonify({'success': True, 'analysis': analysis})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ai_security/explain/<int:event_id>', methods=['GET'])
+@rate_limit(max_requests=10, window=60)
+def api_ai_security_explain(event_id):
+    """Explain a security event (Claude-backed when configured, rule-based otherwise)."""
+    try:
+        username = session.get('user_id')
+        if not username:
+            return jsonify({'success': False, 'error': 'Not logged in'}), 401
+        result = get_ai_security().explain_event(event_id)
+        if not result.get('found'):
+            return jsonify({'success': False, 'error': f'Event {event_id} not found'}), 404
+        return jsonify({'success': True, **result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

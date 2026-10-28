@@ -132,15 +132,19 @@ class ExpenseResponseMessage(ProtocolMessage):
         - error_code: Error code (if failed)
         - receipt: Cryptographic receipt (server signature, if successful)
         - receipt_timestamp: When receipt was issued
+        - security: AI security assessment (risk score, level, reasons)
     """
     
     def __init__(self, success: bool, message: str, entry_id: Optional[int] = None, 
                  entry_hash: Optional[str] = None, error_code: Optional[str] = None,
-                 receipt: Optional[str] = None, receipt_timestamp: Optional[str] = None):
+                 receipt: Optional[str] = None, receipt_timestamp: Optional[str] = None,
+                 security: Optional[Dict[str, Any]] = None):
         payload = {
             "success": success,
             "message": message
         }
+        if security is not None:
+            payload["security"] = security
         if entry_id is not None:
             payload["entry_id"] = entry_id
         if entry_hash is not None:

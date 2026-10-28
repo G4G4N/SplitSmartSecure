@@ -275,6 +275,24 @@ function setupButtons() {
     document.getElementById('refreshBlockchainBtn').addEventListener('click', async () => {
         await loadBlockchain();
     });
+    
+    // AI Security: refresh, dry-run test form and presets
+    document.getElementById('refreshAISecurityBtn').addEventListener('click', async () => {
+        await loadAISecurity();
+    });
+    document.getElementById('aiTestForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await runAITest();
+    });
+    document.querySelectorAll('.ai-preset').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.getElementById('aiTestDescription').value = btn.dataset.desc;
+            document.getElementById('aiTestAmount').value = btn.dataset.amount;
+            if (!document.getElementById('aiTestPayer').value) {
+                document.getElementById('aiTestPayer').value = currentUser || '';
+            }
+        });
+    });
 }
 
 // Check Status
@@ -374,11 +392,18 @@ async function login(username, password) {
             await loadBalances();
             await loadAnalytics();
             await loadBlockchain();
+            await loadAISecurity();
             
             // Clear password fields
             document.getElementById('loginPassword').value = '';
         } else {
             showToast(data.error || 'Login failed', 'error');
+            if (data.security_notice) {
+                showToast(data.security_notice, 'warning');
+            }
+            if (data.retry_after) {
+                showToast(`Blocked by AI Security. Try again in ${data.retry_after}s.`, 'error');
+            }
         }
     } catch (error) {
         showToast('Login failed: ' + error.message, 'error');
@@ -473,16 +498,37 @@ async function addExpense(payer, amount, description) {
         
         if (data.success) {
             showToast(data.message, 'success');
-            // Refresh ledger, balances, and analytics
+            if (data.security) {
+                showRiskToast(data.security, data.warning);
+            }
+            // Refresh ledger, balances, analytics and the AI panel
             await loadLedger();
             await loadBalances();
             await loadAnalytics();
+            await loadAISecurity();
         } else {
             showToast(data.error || 'Failed to add expense', 'error');
+            if (data.security) {
+                showRiskToast(data.security);
+                await loadAISecurity();
+            }
+            if (data.retry_after) {
+                showToast(`Blocked by AI Security. Try again in ${data.retry_after}s.`, 'error');
+            }
         }
     } catch (error) {
         showToast('Failed to add expense: ' + error.message, 'error');
     }
+}
+
+// Show the AI risk verdict for a submitted expense
+function showRiskToast(security, warning) {
+    const level = (security.risk_level || 'LOW').toUpperCase();
+    const score = Number(security.risk_score || 0).toFixed(0);
+    const reasons = (security.reasons || []).slice(0, 2).map(escapeHtml).join('; ');
+    const type = security.action === 'block' ? 'error' : (security.action === 'flag' ? 'warning' : 'success');
+    const headline = warning ? escapeHtml(warning) : `AI Security: ${level} risk (score ${score}/100)`;
+    showToast(`${headline}${reasons ? '<br><small>' + reasons + '</small>' : ''}`, type);
 }
 
 // Load Ledger
@@ -894,6 +940,7 @@ function updateUI() {
             initializeCharts();
             loadAnalytics();
             loadBlockchain();
+            loadAISecurity();
         }, 100);
     } else {
         authSection.style.display = 'block';
@@ -990,6 +1037,225 @@ function displayBlockchain(blockchainInfo, blocks) {
             ${blocksHtml}
         </div>
     `;
+}
+
+// ---------------------------------------------------------------------------
+// AI Security Monitor
+// ---------------------------------------------------------------------------
+const SEVERITY_ICONS = {
+    critical: 'fa-radiation',
+    high: 'fa-exclamation-triangle',
+    medium: 'fa-exclamation-circle',
+    low: 'fa-info-circle',
+    info: 'fa-check-circle'
+};
+
+function riskBadge(level) {
+    const lvl = String(level || 'LOW').toLowerCase();
+    return `<span class="risk-badge ${lvl}">${escapeHtml(String(level || 'LOW'))}</span>`;
+}
+
+function formatEventType(type) {
+    return String(type || '').replace(/_/g, ' ');
+}
+
+// Load AI Security dashboard
+async function loadAISecurity() {
+    try {
+        const response = await fetch(`${API_BASE}/api/ai_security/status`, {
+            credentials: 'include'
+        });
+        if (response.status === 401) {
+            return;
+        }
+        const data = await response.json();
+        if (data.success && data.dashboard) {
+            displayAISecurity(data.dashboard);
+        } else {
+            console.error('Failed to load AI security status:', data.error);
+        }
+    } catch (error) {
+        console.error('Error loading AI security status:', error);
+    }
+}
+
+// Display AI Security dashboard
+function displayAISecurity(dashboard) {
+    const threat = dashboard.threat_level || {};
+    const levelBox = document.getElementById('aiThreatLevel');
+    const level = String(threat.level || 'NORMAL').toLowerCase();
+    levelBox.className = `ai-threat-level ${level}`;
+    document.getElementById('aiThreatLevelText').textContent = `Threat level: ${threat.level || 'NORMAL'}`;
+    document.getElementById('aiThreatLevelLabel').textContent = threat.label || '';
+    
+    const clientBox = document.getElementById('aiClientStatus');
+    const client = dashboard.client || {};
+    const action = client.action || 'allow';
+    clientBox.innerHTML = `Your client: <span class="risk-badge ${action === 'allow' ? 'low' : (action === 'block' ? 'critical' : 'medium')}">${escapeHtml(action)}</span> score ${Number(client.score || 0).toFixed(0)}`;
+    
+    const stats = dashboard.stats || {};
+    document.getElementById('aiStatAnalyzed').textContent = stats.expenses_analyzed || 0;
+    document.getElementById('aiStatFlagged').textContent = stats.anomalies_flagged || 0;
+    document.getElementById('aiStatBlocked').textContent = stats.threats_blocked || 0;
+    document.getElementById('aiStatClients').textContent = stats.clients_blocked || 0;
+    
+    // Models
+    const models = dashboard.models || {};
+    const tc = models.threat_classifier || {};
+    const ad = models.anomaly_detector || {};
+    const id = models.intrusion_detector || {};
+    const llm = models.llm_analyst || {};
+    document.getElementById('aiModels').innerHTML = `
+        <div class="ai-model">
+            <strong><i class="fas fa-bug"></i> Threat classifier</strong>
+            <p>${escapeHtml(tc.model || '')}</p>
+            <small>${tc.training_samples || 0} training samples · ${tc.vocabulary_size || 0} features · ${tc.signature_rules || 0} signature rules</small>
+        </div>
+        <div class="ai-model">
+            <strong><i class="fas fa-chart-line"></i> Anomaly detector</strong>
+            <p>${escapeHtml(ad.model || '')}</p>
+            <small>${ad.entries_learned || 0} entries learned · ${ad.users_profiled || 0} users profiled · group mean $${Number(ad.group_mean_amount || 0).toFixed(2)}</small>
+        </div>
+        <div class="ai-model">
+            <strong><i class="fas fa-user-shield"></i> Intrusion detector</strong>
+            <p>${escapeHtml(id.model || '')}</p>
+            <small>${id.clients_tracked || 0} clients tracked · ${id.currently_blocked || 0} blocked · thresholds ${id.thresholds ? `${id.thresholds.challenge}/${id.thresholds.throttle}/${id.thresholds.block}` : ''}</small>
+        </div>
+        <div class="ai-model">
+            <strong><i class="fas fa-robot"></i> LLM analyst</strong>
+            <p>${llm.available ? `Available (${escapeHtml(llm.model || '')})` : 'Not configured - rule-based explanations in use'}</p>
+            <small>${llm.available ? `${llm.calls || 0} calls` : 'Set ANTHROPIC_API_KEY to enable Claude-backed incident explanations'}</small>
+        </div>
+    `;
+    
+    // Baselines
+    const profiles = dashboard.user_profiles || {};
+    const profileRows = Object.entries(profiles);
+    document.getElementById('aiProfiles').innerHTML = profileRows.length === 0
+        ? '<p class="loading-text">No baselines learned yet - add a few expenses</p>'
+        : profileRows.map(([user, p]) => `
+            <div class="ai-profile">
+                <span class="ai-profile-user"><i class="fas fa-user"></i> ${escapeHtml(user)}</span>
+                <span>${p.samples} entries · mean $${Number(p.mean_amount).toFixed(2)} ± $${Number(p.std_amount).toFixed(2)} · max $${Number(p.max_amount).toFixed(2)}</span>
+            </div>
+        `).join('');
+    
+    // Events
+    const events = dashboard.recent_events || [];
+    document.getElementById('aiEvents').innerHTML = events.length === 0
+        ? '<div class="empty-state"><i class="fas fa-shield-alt"></i><p>No security events recorded</p></div>'
+        : events.map(ev => {
+            const severity = String(ev.severity || 'info').toLowerCase();
+            const details = ev.details || {};
+            const reasons = (details.reasons || []).slice(0, 2).map(escapeHtml).join('<br>');
+            const when = ev.timestamp ? new Date(ev.timestamp + 'Z').toLocaleString() : '';
+            return `
+                <div class="ai-event ${severity}" data-event-id="${ev.id}">
+                    <div class="ai-event-header">
+                        <span><i class="fas ${SEVERITY_ICONS[severity] || 'fa-info-circle'}"></i> ${escapeHtml(formatEventType(ev.event_type))}</span>
+                        <span class="risk-badge ${severity === 'critical' ? 'critical' : (severity === 'high' ? 'high' : (severity === 'medium' ? 'medium' : 'low'))}">${escapeHtml(severity)}</span>
+                    </div>
+                    <div class="ai-event-meta">
+                        ${ev.user_id ? `user <strong>${escapeHtml(ev.user_id)}</strong> · ` : ''}client ${escapeHtml(ev.client_id || '')} · risk ${Number(ev.risk_score || 0).toFixed(0)} · ${escapeHtml(when)}
+                    </div>
+                    ${reasons ? `<div class="ai-event-reasons">${reasons}</div>` : ''}
+                    ${details.description !== undefined ? `<div class="ai-event-payload">payload: <code>${escapeHtml(String(details.description))}</code></div>` : ''}
+                    <button class="btn btn-secondary ai-explain-btn" onclick="explainEvent(${Number(ev.id)}, this)">
+                        <i class="fas fa-comment-dots"></i> Explain
+                    </button>
+                    <div class="ai-explain"></div>
+                </div>
+            `;
+        }).join('');
+}
+
+// Ask the engine (Claude when configured) to explain an event
+async function explainEvent(eventId, button) {
+    const container = button.parentElement.querySelector('.ai-explain');
+    container.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i><p>Analysing...</p></div>';
+    try {
+        const response = await fetch(`${API_BASE}/api/ai_security/explain/${eventId}`, {
+            credentials: 'include'
+        });
+        const data = await response.json();
+        if (!data.success) {
+            container.innerHTML = `<div class="ai-explain-body">Error: ${escapeHtml(data.error || 'unknown')}</div>`;
+            return;
+        }
+        const ex = data.explanation || {};
+        container.innerHTML = `
+            <div class="ai-explain-body">
+                <div class="ai-explain-source">${data.source === 'llm' ? '<i class="fas fa-robot"></i> Claude analyst' : '<i class="fas fa-cogs"></i> Rule-based analyst'} · likely attack: <strong>${ex.likely_attack ? 'yes' : 'no'}</strong> · severity ${riskBadge(ex.severity)}</div>
+                <p>${escapeHtml(ex.summary || '')}</p>
+                ${(ex.indicators || []).length ? `<strong>Indicators</strong><ul>${ex.indicators.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>` : ''}
+                ${(ex.recommended_actions || []).length ? `<strong>Recommended actions</strong><ul>${ex.recommended_actions.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>` : ''}
+            </div>
+        `;
+    } catch (error) {
+        container.innerHTML = `<div class="ai-explain-body">Error: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+// Dry-run analysis of an expense / payload
+async function runAITest() {
+    const payer = document.getElementById('aiTestPayer').value.trim() || currentUser;
+    const amount = parseFloat(document.getElementById('aiTestAmount').value) || 0;
+    const description = document.getElementById('aiTestDescription').value.trim();
+    const resultDiv = document.getElementById('aiTestResult');
+    if (!description) {
+        showToast('Enter a description or payload to analyse', 'error');
+        return;
+    }
+    resultDiv.className = 'ai-test-result show';
+    resultDiv.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i><p>Analysing...</p></div>';
+    try {
+        const response = await fetch(`${API_BASE}/api/ai_security/analyze`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ payer, amount, description })
+        });
+        const data = await response.json();
+        if (!data.success) {
+            resultDiv.innerHTML = `<div class="ai-test-verdict block">Error: ${escapeHtml(data.error || 'analysis failed')}</div>`;
+            return;
+        }
+        const a = data.analysis;
+        const threat = a.threat || {};
+        const anomaly = a.anomaly || {};
+        const verdictClass = a.action === 'block' ? 'block' : (a.action === 'flag' ? 'flag' : 'allow');
+        const verdictIcon = a.action === 'block' ? 'fa-ban' : (a.action === 'flag' ? 'fa-flag' : 'fa-check-circle');
+        resultDiv.innerHTML = `
+            <div class="ai-test-verdict ${verdictClass}">
+                <i class="fas ${verdictIcon}"></i>
+                <div>
+                    <strong>Verdict: ${escapeHtml(String(a.action).toUpperCase())}</strong> ${riskBadge(a.risk_level)} <span>risk score ${Number(a.risk_score).toFixed(0)}/100</span>
+                    ${a.would_block ? `<p>${escapeHtml(a.block_reason || '')}</p>` : ''}
+                </div>
+            </div>
+            <div class="ai-test-details">
+                <div>
+                    <strong>Threat classifier</strong>
+                    <p>${escapeHtml(threat.description || threat.label || '')} · confidence ${(Number(threat.confidence || 0) * 100).toFixed(0)}%
+                    ${threat.signatures && threat.signatures.length ? `<br><small>rules: ${threat.signatures.map(escapeHtml).join(', ')}</small>` : ''}</p>
+                    <div class="ai-proba">
+                        ${Object.entries(threat.probabilities || {}).map(([label, p]) => `
+                            <div class="ai-proba-row"><span>${escapeHtml(label)}</span><div class="ai-proba-bar"><div style="width:${Math.max(1, p * 100).toFixed(1)}%"></div></div><span>${(p * 100).toFixed(0)}%</span></div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div>
+                    <strong>Anomaly detector</strong> ${riskBadge(anomaly.level)}
+                    <p>score ${Number(anomaly.score || 0).toFixed(0)} · baseline: ${escapeHtml((anomaly.baseline || {}).source || 'none')}${anomaly.cold_start ? ' (cold start)' : ''}</p>
+                    ${(anomaly.signals || []).length
+                        ? `<ul>${anomaly.signals.map(sig => `<li><strong>${escapeHtml(sig.name)}</strong> (+${sig.score}): ${escapeHtml(sig.detail)}</li>`).join('')}</ul>`
+                        : '<p class="loading-text">No behavioural anomalies</p>'}
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="ai-test-verdict block">Error: ${escapeHtml(error.message)}</div>`;
+    }
 }
 
 // Show Toast Notification

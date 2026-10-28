@@ -87,6 +87,24 @@ class Storage:
             )
         """)
         
+        # AI security events (anomalies, injection attempts, intrusion signals)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS security_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                client_id TEXT,
+                user_id TEXT,
+                risk_score REAL DEFAULT 0,
+                details TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_security_events_time
+            ON security_events (timestamp DESC)
+        """)
+        
         conn.commit()
         conn.close()
     
@@ -414,5 +432,118 @@ class Storage:
             cursor.execute("SELECT user_id FROM users ORDER BY user_id")
             rows = cursor.fetchall()
             return [row[0] for row in rows]
+        finally:
+            conn.close()
+    
+    # ------------------------------------------------------------------
+    # AI security events
+    # ------------------------------------------------------------------
+    def add_security_event(self, timestamp: str, event_type: str, severity: str,
+                           client_id: Optional[str] = None, user_id: Optional[str] = None,
+                           risk_score: float = 0.0, details: Optional[str] = None) -> Optional[int]:
+        """
+        Persist a security event produced by the AI security engine.
+        
+        Args:
+            timestamp: ISO timestamp
+            event_type: Event type (e.g. injection_detected, anomaly_high)
+            severity: info / low / medium / high / critical
+            client_id: Client identifier (IP address, session or user)
+            user_id: User involved, if any
+            risk_score: Risk score at the time of the event
+            details: JSON-encoded details
+            
+        Returns:
+            Event ID if successful, None otherwise
+        """
+        conn = None
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=10.0)
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO security_events
+                (timestamp, event_type, severity, client_id, user_id, risk_score, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (timestamp, event_type, severity, client_id, user_id, risk_score, details))
+            event_id = cursor.lastrowid
+            conn.commit()
+            return event_id
+        except Exception as e:
+            print(f"Error adding security event: {e}")
+            return None
+        finally:
+            if conn:
+                conn.close()
+    
+    def get_security_events(self, limit: int = 50, event_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get the most recent security events (newest first).
+        
+        Args:
+            limit: Maximum number of events to return
+            event_type: Optional event type filter
+            
+        Returns:
+            List of event dictionaries
+        """
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            cursor = conn.cursor()
+            query = """
+                SELECT id, timestamp, event_type, severity, client_id, user_id, risk_score, details
+                FROM security_events
+            """
+            params: tuple = ()
+            if event_type:
+                query += " WHERE event_type = ?"
+                params = (event_type,)
+            query += " ORDER BY id DESC LIMIT ?"
+            cursor.execute(query, params + (int(limit),))
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
+        
+        return [
+            {
+                "id": row[0],
+                "timestamp": row[1],
+                "event_type": row[2],
+                "severity": row[3],
+                "client_id": row[4],
+                "user_id": row[5],
+                "risk_score": row[6],
+                "details": row[7],
+            }
+            for row in rows
+        ]
+    
+    def count_security_events(self) -> Dict[str, int]:
+        """
+        Count security events grouped by type.
+        
+        Returns:
+            Dictionary mapping event type to count
+        """
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT event_type, COUNT(*) FROM security_events GROUP BY event_type")
+            return {row[0]: row[1] for row in cursor.fetchall()}
+        finally:
+            conn.close()
+    
+    def clear_security_events(self) -> int:
+        """
+        Delete all security events (used by demos and tests).
+        
+        Returns:
+            Number of deleted rows
+        """
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM security_events")
+            conn.commit()
+            return cursor.rowcount
         finally:
             conn.close()

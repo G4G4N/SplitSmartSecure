@@ -56,6 +56,7 @@ def main():
         ("Spoofing Attack", "demos/demo_spoofing.py", "demo_spoofing"),
         ("Replay Attack", "demos/demo_replay.py", "demo_replay"),
         ("Ledger Tampering", "demos/demo_tampering.py", "demo_tampering"),
+        ("AI Security Layer", "demos/demo_ai_security.py", "demo_ai_security"),
     ]
     
     for i, (name, path, func_name) in enumerate(demos, 1):
