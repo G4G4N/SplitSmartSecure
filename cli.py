@@ -160,6 +160,68 @@ def cmd_verify_ledger(args):
             print(f"[CRYPTO] Hash mismatch detected!")
             print(f"[CRYPTO] Database has been tampered with")
 
+def cmd_security_status(args):
+    """Show the AI security dashboard."""
+    init_server()
+    dashboard = server.get_security_dashboard()
+    threat = dashboard['threat_level']
+    stats = dashboard['stats']
+    models = dashboard['models']
+    
+    print(f"\n{dashboard['engine']['name']} v{dashboard['engine']['version']}")
+    print(f"  Threat level: {threat['level']} - {threat['label']}")
+    print(f"  Expenses analysed: {stats['expenses_analyzed']}  |  anomalies flagged: {stats['anomalies_flagged']}"
+          f"  |  threats blocked: {stats['threats_blocked']}  |  clients blocked: {stats['clients_blocked']}")
+    
+    print("\nModels:")
+    tc = models['threat_classifier']
+    print(f"  Threat classifier:  {tc['training_samples']} samples, {tc['vocabulary_size']} features, "
+          f"{tc['signature_rules']} signature rules")
+    ad = models['anomaly_detector']
+    print(f"  Anomaly detector:   {ad['entries_learned']} entries learned, {ad['users_profiled']} users profiled, "
+          f"group mean ${ad['group_mean_amount']:.2f} ± ${ad['group_std_amount']:.2f}")
+    idt = models['intrusion_detector']
+    print(f"  Intrusion detector: {idt['clients_tracked']} clients tracked, {idt['currently_blocked']} blocked "
+          f"(thresholds {idt['thresholds']['challenge']}/{idt['thresholds']['throttle']}/{idt['thresholds']['block']})")
+    llm = models['llm_analyst']
+    print(f"  LLM analyst:        {'available (' + llm['model'] + ')' if llm['available'] else 'not configured (set ANTHROPIC_API_KEY)'}")
+    
+    profiles = dashboard['user_profiles']
+    if profiles:
+        print("\nLearned baselines:")
+        for user, prof in profiles.items():
+            print(f"  {user:12} {prof['samples']:3} entries  mean ${prof['mean_amount']:>9.2f}  "
+                  f"std ${prof['std_amount']:>8.2f}  max ${prof['max_amount']:>9.2f}")
+    
+    events = dashboard['recent_events'][:args.limit]
+    print(f"\nRecent security events ({len(events)}):")
+    if not events:
+        print("  (none)")
+    for event in events:
+        details = event.get('details') or {}
+        extra = details.get('description') or (details.get('reasons') or [''])[0]
+        print(f"  {event['timestamp'][:19]}  [{event['severity']:8}] {event['event_type']:20} "
+              f"user={event.get('user_id') or '-':10} risk={event['risk_score']:>5}  {str(extra)[:40]}")
+
+def cmd_security_analyze(args):
+    """Dry-run an expense through the AI security engine."""
+    init_server()
+    result = server.ai_security.analyze_expense(args.user, args.payer or args.user, args.amount, args.description)
+    threat = result['threat']
+    anomaly = result['anomaly']
+    print(f"\nVerdict: {result['action'].upper()}  risk {result['risk_level']} (score {result['risk_score']:.0f}/100)")
+    if result['would_block']:
+        print(f"  {result['block_reason']}")
+    print(f"  Threat classifier: {threat['description']} (confidence {threat['confidence']:.0%})"
+          + (f", rules: {', '.join(threat['signatures'])}" if threat['signatures'] else ""))
+    print(f"  Anomaly detector:  score {anomaly['score']:.0f} ({anomaly['level']}), baseline: {anomaly['baseline']['source']}")
+    for signal in anomaly['signals']:
+        print(f"    • {signal['name']} (+{signal['score']:.0f}): {signal['detail']}")
+    if verbose:
+        print("\n[AI] Class probabilities:")
+        for label, prob in threat['probabilities'].items():
+            print(f"[AI]   {label:20} {prob:.3f}")
+
 def cmd_show_counter(args):
     """Show user's counter."""
     init_server()
@@ -287,6 +349,8 @@ Examples:
   # Check security
   python cli.py verify
   python cli.py counter alice
+  python cli.py security
+  python cli.py analyze alice 20 "'; DROP TABLE ledger; --"
   
   # Show crypto operations (verbose mode)
   python cli.py --verbose register alice
@@ -348,6 +412,19 @@ Examples:
     parser_counter = subparsers.add_parser('counter', help='Show user counter')
     parser_counter.add_argument('user', help='Username')
     parser_counter.set_defaults(func=cmd_show_counter)
+    
+    # AI security dashboard command
+    parser_security = subparsers.add_parser('security', help='Show the AI security dashboard')
+    parser_security.add_argument('--limit', type=int, default=10, help='Number of recent events to show')
+    parser_security.set_defaults(func=cmd_security_status)
+    
+    # AI security dry-run analysis command
+    parser_analyze = subparsers.add_parser('analyze', help='Dry-run an expense through the AI security engine')
+    parser_analyze.add_argument('user', help='User submitting the expense')
+    parser_analyze.add_argument('amount', type=float, help='Amount paid')
+    parser_analyze.add_argument('description', help='Expense description or payload')
+    parser_analyze.add_argument('--payer', help='Who paid (defaults to user)')
+    parser_analyze.set_defaults(func=cmd_security_analyze)
     
     # Quick demo command
     parser_demo = subparsers.add_parser('demo', help='Run quick demo')

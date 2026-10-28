@@ -35,6 +35,8 @@ class SplitSmartClient:
         self.server = server
         self.crypto = ClientCrypto(user_id)
         self.server_public_key = None
+        self.last_response = None  # Payload of the last EXPENSE_RESPONSE
+        self.last_error = None     # Payload of the last ERROR message
         
         print(f"[Client] Initialized client for {user_id}")
     
@@ -177,13 +179,20 @@ class SplitSmartClient:
             response = ProtocolMessage.from_dict(response_dict)
         
         if response.msg_type == MSG_TYPE_ERROR:
+            self.last_error = response.payload
             print(f"[Client] Error: {response.payload['message']}")
             return False
         
         if response.msg_type == MSG_TYPE_EXPENSE_RESPONSE:
+            self.last_response = response.payload
+            self.last_error = None
             if response.payload["success"]:
                 print(f"[Client] ✓ Expense recorded (ID: {response.payload['entry_id']})")
                 print(f"[Client]   Entry hash: {response.payload['entry_hash'][:16]}...")
+                security = response.payload.get("security")
+                if security:
+                    print(f"[Client]   AI risk: {security['risk_level']} "
+                          f"(score {security['risk_score']:.0f}/100, action: {security['action']})")
                 return True
             else:
                 print(f"[Client] ✗ Failed: {response.payload['message']}")

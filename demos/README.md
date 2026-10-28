@@ -109,6 +109,30 @@ python demos/demo_tampering.py
 
 ---
 
+### 6. `demo_ai_security.py`
+
+**Purpose**: Demonstrates the AI security layer that sits on top of the cryptography.
+
+**What it does**:
+- Trains a spending baseline for a user from normal expenses
+- Submits SQL injection, XSS, command injection, path traversal and prompt injection payloads as expense descriptions
+- Submits an unusual expense (flagged) and an extreme one (blocked)
+- Simulates password guessing and credential stuffing against the intrusion detector
+- Prints the resulting security event log and an analyst explanation
+
+**How to run**:
+```bash
+python demos/demo_ai_security.py
+```
+
+**Key demonstration**:
+- Shows the Naive Bayes + signature classifier rejecting malicious payloads
+- Shows behavioural anomaly scores (z-score, ratio, absolute limits, unknown payer)
+- Shows the adaptive response escalating allow -> challenge -> throttle -> block
+- Proves detections are logged and explainable
+
+---
+
 ## Running All Demos
 
 To run all attack demonstrations in sequence:

@@ -21,3 +21,8 @@ bcrypt>=4.0.0
 # For web UI demos (browser automation)
 selenium>=4.15.0
 webdriver-manager>=4.0.0
+
+# Optional: Claude-backed security analyst (ai_security/llm_analyst.py).
+# Only used when ANTHROPIC_API_KEY (or an `ant auth login` profile) is configured;
+# the AI security layer works fully offline without it.
+anthropic>=1.0.0

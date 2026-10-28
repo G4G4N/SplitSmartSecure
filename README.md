@@ -1,6 +1,6 @@
 # SplitSmart - Secure Expense Splitting Application
 
-A cryptographically secure expense-splitting service demonstrating end-to-end encryption, digital signatures, tamper-evident blockchain ledger, and protection against common network attacks.
+A cryptographically secure expense-splitting service demonstrating end-to-end encryption, digital signatures, tamper-evident blockchain ledger, protection against common network attacks, and an AI security layer that detects anomalous and malicious activity the cryptography alone cannot see.
 
 ## 🎯 Project Overview
 
@@ -61,10 +61,18 @@ SplitSmart is a networked expense-splitting service for a fixed group of users (
    - 17 slides covering all features
    - Attack demonstrations
 
-9. **🧪 Burp Suite Testing Guide (NEW)**
+9. **🧪 Burp Suite Testing Guide**
    - Comprehensive guide for testing attacks with Burp Suite
    - Step-by-step instructions for eavesdropping, modification, replay, and tampering tests
    - Expected results and verification steps
+
+10. **🤖 AI Security Layer (NEW)**
+   - **Injection payload classifier**: Naive Bayes model + signature rules reject SQL, XSS, command, path-traversal and prompt-injection payloads
+   - **Behavioural anomaly detection**: per-user spending baselines learned from the ledger; unusual expenses are flagged, extreme ones blocked
+   - **Adaptive intrusion response**: decaying per-client risk score escalates allow → challenge → throttle → block (brute force, credential stuffing, tampering)
+   - **Security event log** persisted in SQLite, live **AI Security Monitor** dashboard with a dry-run "Test the AI" panel
+   - **Optional Claude analyst** explains incidents in plain language, with prompt-injection-safe handling of user text
+   - Design details in [AI_SECURITY.md](AI_SECURITY.md)
 
 ## 🔒 Security Features
 
@@ -87,6 +95,13 @@ SplitSmart is a networked expense-splitting service for a fixed group of users (
    - Confidentiality and integrity for all messages
    - Protects against eavesdropping and modification
 
+4. **Layer 4: AI Security (NEW)**
+   - Runs after the cryptographic checks on every authenticated submission
+   - Threat classifier rejects injection payloads in free-text fields
+   - Anomaly detector scores each expense against learned behaviour (z-score, velocity, payer graph, absolute limits)
+   - Intrusion detector turns failed logins, HMAC mismatches, replays and bad signatures into a graduated response
+   - Protects against misuse of *valid* credentials and sessions
+
 ### Attack Defenses
 
 | Attack Type | Defense Mechanism | Implementation | Status |
@@ -97,7 +112,10 @@ SplitSmart is a networked expense-splitting service for a fixed group of users (
 | **Replay** | Monotonic counters + Request deduplication | Protocol-level counters + Web API hash tracking | ✅ Protected |
 | **Ledger Tampering** | Blockchain hash chain | Breaks detected on startup | ✅ Protected |
 | **Brute Force** | Rate limiting | API rate limits | ✅ Protected |
-| **Injection** | Input validation | Sanitization and validation | ✅ Protected |
+| **Injection** | Input validation + AI payload classifier | Sanitization, Naive Bayes model, 19 signature rules | ✅ Protected |
+| **Anomalous Transactions** | AI behavioural baselines | z-score / ratio / velocity / payer signals, CRITICAL blocked | ✅ Protected |
+| **Credential Stuffing** | AI intrusion response | Decaying per-client score, tarpit + 5-minute block | ✅ Protected |
+| **Prompt Injection (LLM)** | Untrusted-data isolation | User text quarantined in the analyst prompt, schema-validated output | ✅ Protected |
 
 ### Web API Security Layers
 
@@ -120,6 +138,12 @@ The web application implements **additional security layers** on top of the cryp
    - AES-256-GCM encryption for protocol messages
    - RSA-PSS signatures for expense records
    - Monotonic counters for protocol-level replay protection
+
+4. **AI Security Screening (NEW)**
+   - Blocked clients receive `403` + `Retry-After` on login, register and expense endpoints
+   - Failed logins, HMAC mismatches and replays feed the intrusion score; throttled clients are tarpitted
+   - Every expense is screened before signing; responses carry a `security` block (risk score, level, reasons)
+   - `/api/ai_security/status`, `/events`, `/analyze` (dry run) and `/explain/<id>` power the dashboard
 
 ## 🏗️ Architecture
 
@@ -150,6 +174,10 @@ The web application implements **additional security layers** on top of the cryp
 │  │  Message     │  │  Blockchain   │  │  Storage     │      │
 │  │  Processing  │──│  Ledger       │──│  (SQLite)    │      │
 │  └──────────────┘  └──────────────┘  └──────────────┘      │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  AI Security Engine: threat classifier · anomaly     │   │
+│  │  detection · intrusion response · LLM analyst        │   │
+│  └──────────────────────────────────────────────────────┘   │
 │                                                              │
 │  Blockchain: Genesis → Block 0 → Block 1 → ... → Block N   │
 │  Hash Chain: H₀ → H₁ → H₂ → ... → Hₙ                       │
@@ -192,16 +220,26 @@ SplitSmartSecure/
 │   ├── crypto_primitives.py    # Core crypto functions
 │   ├── protocols.py            # Protocol message formats
 │   └── constants.py             # Cryptographic constants
+├── ai_security/                 # AI security layer (NEW)
+│   ├── engine.py               # Facade: assess / commit / record / dashboard / explain
+│   ├── threat_classifier.py    # Naive Bayes + signature injection classifier
+│   ├── anomaly_detector.py     # Behavioural baselines and anomaly scoring
+│   ├── intrusion_detector.py   # Decaying per-client risk score, adaptive response
+│   ├── llm_analyst.py          # Optional Claude-backed incident explanations
+│   └── config.py               # Thresholds (overridable via AI_SECURITY_* env vars)
 ├── demos/                       # Attack demonstrations
 │   ├── demo_eavesdropping.py   # Eavesdropping attack demo
 │   ├── demo_modification.py    # Modification attack demo
 │   ├── demo_spoofing.py        # Spoofing attack demo
 │   ├── demo_replay.py          # Replay attack demo
-│   └── demo_tampering.py       # Ledger tampering demo
+│   ├── demo_tampering.py       # Ledger tampering demo
+│   └── demo_ai_security.py     # AI security layer demo (NEW)
 ├── tests/                       # Test suites
 │   ├── test_crypto.py          # Crypto primitives tests
 │   ├── test_key_exchange.py     # Key exchange tests
-│   └── test_signature.py       # Signature verification tests
+│   ├── test_signature.py       # Signature verification tests
+│   ├── test_ai_security.py     # AI security unit + protocol tests (NEW)
+│   └── test_web_ai_security.py # AI security web API tests (NEW)
 ├── static/                      # Web static files
 │   ├── css/
 │   │   └── style.css           # Web UI styles
@@ -217,6 +255,7 @@ SplitSmartSecure/
 ├── requirements.txt             # Python dependencies
 ├── Procfile                     # Deployment configuration
 ├── runtime.txt                  # Python version
+├── AI_SECURITY.md               # AI security layer design document (NEW)
 └── README.md                    # This file
 ```
 
@@ -325,6 +364,7 @@ Press Ctrl+C to stop the server
 - **Analytics**: View charts and statistics
 - **Blockchain Info**: See block heights, hashes, chain validity
 - **Security Explanation**: Learn how encryption works
+- **AI Security Monitor**: Live threat level, detection counters, model details, learned baselines, event log with "Explain", and a dry-run "Test the AI" panel with attack presets
 
 #### Test the Web Application
 
@@ -479,6 +519,18 @@ python demos/demo_tampering.py
 - How blockchain hash chain detects tampering
 - Why tampered entries break the chain
 
+#### 6. AI Security Layer
+
+```bash
+python demos/demo_ai_security.py
+```
+
+**Demonstrates:**
+- Five injection payloads classified and rejected, then the attacking identity blocked
+- A $250 hotel flagged (MEDIUM) but accepted; a $90,000 "yacht" rejected (CRITICAL)
+- Password guessing escalating allow → challenge → throttle → block, and credential stuffing
+- The persisted security event log and an analyst explanation
+
 ### Run All Demos
 
 ```bash
@@ -491,6 +543,36 @@ python run_all_demos.py
 3. Spoofing Attack
 4. Replay Attack
 5. Ledger Tampering
+
+## 🤖 AI Security Layer
+
+The AI layer answers a question the cryptography cannot: *is this authentic request also legitimate?* Full design in [AI_SECURITY.md](AI_SECURITY.md).
+
+| Component | Technique | Decides |
+|-----------|-----------|---------|
+| `ThreatClassifier` | Multinomial Naive Bayes (word, punctuation and char-trigram features, ~250 built-in labelled samples) corroborated by 19 signature rules | Reject SQL / XSS / command / path-traversal / prompt-injection payloads. Only signature-backed verdicts block; the model alone can only raise suspicion |
+| `ExpenseAnomalyDetector` | Online per-user and group baselines (Welford mean/variance, velocity, hour-of-day, payer graph), rebuilt from the ledger at start-up | Risk score 0-100 → LOW / MEDIUM / HIGH (flagged) / CRITICAL (blocked) |
+| `IntrusionDetector` | Weighted security signals with exponential decay per client (IP or user identity), credential-stuffing detection | allow → challenge → throttle (tarpit) → block (5 min, `Retry-After`) |
+| `LLMSecurityAnalyst` | Claude (`claude-opus-5-5`) with structured JSON output; user text isolated as untrusted data | Explains events for the operator; never makes allow/block decisions |
+
+**Try it from the terminal:**
+
+```bash
+python cli.py analyze alice 20 "'; DROP TABLE ledger; --"   # dry-run any payload / amount
+python cli.py security                                       # dashboard: threat level, models, events
+```
+
+**Enable the Claude analyst (optional):**
+
+```bash
+pip install anthropic            # already in requirements.txt
+export ANTHROPIC_API_KEY=sk-ant-...
+python web_app.py                # the "Explain" buttons now use Claude
+```
+
+Without a key the engine falls back to rule-based explanations, so every other feature works offline. The request opts into Anthropic's server-side refusal fallback (`fallbacks="default"`) so a safety-classifier refusal is retried on a suitable fallback model automatically.
+
+**Tuning:** every threshold is an environment variable (`AI_SECURITY_Z_WARN`, `AI_SECURITY_AMOUNT_CRITICAL`, `AI_SECURITY_BLOCK_SCORE`, `AI_SECURITY_BLOCK_CRITICAL`, `AI_SECURITY_THROTTLE_DELAY`, ...); see `ai_security/config.py` and the table in [AI_SECURITY.md](AI_SECURITY.md#configuration).
 
 ## 🔬 Testing
 
@@ -519,6 +601,12 @@ pytest tests/test_key_exchange.py -v
 
 # Signature verification
 pytest tests/test_signature.py -v
+
+# AI security layer (unit + protocol integration)
+pytest tests/test_ai_security.py -v
+
+# AI security via the Flask web API
+pytest tests/test_web_ai_security.py -v
 ```
 
 ### Test Coverage
@@ -762,7 +850,8 @@ See `DEPLOYMENT_GUIDE.md` for detailed instructions.
 ### Main Documentation Files
 
 - **README.md** (this file) - Main project documentation
-- **BURP_SUITE_TESTING_GUIDE.md** - Comprehensive Burp Suite attack testing guide (NEW)
+- **AI_SECURITY.md** - AI security layer: models, signals, thresholds, prompt-injection defences (NEW)
+- **BURP_SUITE_TESTING_GUIDE.md** - Comprehensive Burp Suite attack testing guide
 - **WEB_APP_README.md** - Web application guide
 - **BLOCKCHAIN_SECURITY_README.md** - Security documentation
 - **ENCRYPTION_ALGORITHMS_README.md** - Encryption algorithms guide
@@ -795,7 +884,16 @@ See `DEPLOYMENT_GUIDE.md` for detailed instructions.
 
 ## 📝 Changelog
 
-### Version 2.1 (Latest - December 2024)
+### Version 3.0 (Latest - AI Security Layer)
+
+- ✅ New `ai_security/` package: threat classifier, behavioural anomaly detector, intrusion detector, optional Claude analyst
+- ✅ Protocol server screens every signed submission; CRITICAL anomalies and injection payloads return `SECURITY_POLICY_VIOLATION`
+- ✅ Web API: adaptive client blocking, login tarpit, HMAC/replay signals, `security` block in expense responses
+- ✅ `/api/ai_security/{status,events,analyze,explain}` endpoints and the AI Security Monitor dashboard card
+- ✅ `security_events` table, `cli.py security` / `cli.py analyze`, `demos/demo_ai_security.py`
+- ✅ 21 new tests (`tests/test_ai_security.py`, `tests/test_web_ai_security.py`)
+
+### Version 2.1 (December 2024)
 
 **Added:**
 - ✅ **Web API Security Enhancements**:
@@ -846,6 +944,8 @@ See `DEPLOYMENT_GUIDE.md` for detailed instructions.
 3. **Simple Balance Calculation**: Basic debt simplification algorithm
 4. **SQLite Database**: File-based, not ideal for high concurrency
 5. **Centralized Server**: Single point of trust
+6. **AI Baselines Need History**: z-score checks start after 5 entries; before that only absolute, velocity and payer checks apply
+7. **Process-Local Intrusion Scores**: with several web workers each process keeps its own live scores (persisted events are shared)
 
 ## 🔮 Future Enhancements
 

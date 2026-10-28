@@ -130,6 +130,42 @@ python tests/test_debug.py
 
 ---
 
+### 7. `test_ai_security.py`
+
+**Purpose**: Tests the AI security layer (`ai_security/` package).
+
+**What it tests**:
+- Threat classifier: injection payloads detected, benign descriptions accepted, model-only verdicts never block
+- Anomaly detector: baselines, z-score / ratio / absolute outliers, velocity and duplicate bursts, unknown payers, training from ledger rows
+- Intrusion detector: allow -> challenge -> throttle -> block escalation, credential stuffing, decay and unblock
+- Engine: block / flag decisions, event persistence, dashboard, rule-based explanations, LLM payload isolation
+- End-to-end: the protocol server rejects injections, blocks CRITICAL anomalies, blocks a repeatedly attacking identity, and re-learns baselines after restart
+
+**How to run**:
+```bash
+python tests/test_ai_security.py
+```
+
+---
+
+### 8. `test_web_ai_security.py`
+
+**Purpose**: Tests the AI security layer through the Flask web API.
+
+**What it tests**:
+- `/api/add_expense` rejects injection payloads (400) and CRITICAL anomalies (403) with a `security` report
+- Clean expenses succeed with a LOW risk report
+- Four failed logins block a client; the fifth attempt returns 403 with `Retry-After`
+- HMAC mismatches are recorded as `hmac_mismatch` events
+- `/api/ai_security/status`, `/events`, `/analyze` (dry run) and `/explain/<id>` behave as documented
+
+**How to run**:
+```bash
+python tests/test_web_ai_security.py
+```
+
+---
+
 ## Running All Tests
 
 To run all tests using pytest:
